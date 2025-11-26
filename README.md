@@ -63,3 +63,8 @@ Adres Çözümleme: Nominatim API (Reverse Geocoding)
 
 [ ] Push Bildirimleri (Planlandı)
 
+## 📄 Lisans
+
+Bu proje açık kaynak kodlu değildir. Kodların mülkiyeti **Eren Talha Temur'a**'a aittir.
+Kaynak kodlar sadece inceleme ve eğitim amaçlı paylaşılmıştır.
+İzin alınmadan kopyalanması, ticari olarak kullanılması veya dağıtılması yasaktır.
