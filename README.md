@@ -1,4 +1,4 @@
-LOGIUBER
+
 LOGIUBER, lojistik sektöründeki verimsizliği ve "boş dönüş" sorununu çözen; yük veren firmalar ile taşıyıcıları akıllı harita üzerinde buluşturan, uçtan uca dijital bir lojistik pazar yeridir.
 
 🌟 Temel Özellikler
