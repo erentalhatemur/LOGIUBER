@@ -8,47 +8,59 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher.dart'; 
 
 // --- AYARLAR ---
-const String SU_URL = 'https://wpzsppbxeofwxcxurnxf.supabase.co';
-const String SU_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwenNwcGJ4ZW9md3hjeHVybnhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3NTAxOTksImV4cCI6MjA3OTMyNjE5OX0.-D9W_XrUKKGnQMg0D0vbBgsFABEddgNgnHxvV7IfQ-k';
+const String SU_URL = 'https://ntxofpiomcftqqzvugcr.supabase.co';
+const String SU_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50eG9mcGlvbWNmdHFxenZ1Z2NyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwMzAxNjIsImV4cCI6MjA4MDYwNjE2Mn0.Ijh3m5RSRVIc11--fGVTsebw-ocu44k6xKzvoCXln-Q';
 
-// GLOBAL
+// GLOBAL KULLANICI BİLGİLERİ (Demo amaçlıdır)
 String currentUserRole = ''; 
 String currentUserName = '';
 int currentUserId = 0;
 
-// --- YENİ ARAÇ VE KASA HİYERARŞİSİ (FAZ 3) ---
-const List<String> vehicleList = [
-  'Minivan', 'Panelvan', 'Uzun Panelvan', // Grup 1
-  'Kamyonet', '6 Teker', '8 Teker', '10 Teker', 'Kırkayak', // Grup 2
-  'TIR' // Grup 3
-];
+// ENUMLAR
+const List<String> vehicleTypes = ['MINIVAN', 'PANELVAN', 'UZUN_PANELVAN', 'KAMYONET', '6_TEKER', '8_TEKER', '10_TEKER', 'KIRKAYAK', 'TIR'];
+const List<String> bodyTypes = ['STANDART', 'KAPALI', 'TENTELI', 'YUKSEK_YAN', 'ACIK', 'FRIGO', 'LOWBED', 'DAMPERLI', 'KONTEYNER'];
 
-// Dinamik Kasa Listesi Getirici
-List<String> getBodyTypesForVehicle(String? vehicle) {
-  if (vehicle == null) return [];
-  if (['Minivan', 'Panelvan', 'Uzun Panelvan'].contains(vehicle)) {
-    return []; // Kasa tipi yok
-  } else if (['Kamyonet', '6 Teker', '8 Teker', '10 Teker', 'Kırkayak'].contains(vehicle)) {
-    return ['Kapalı', 'Tenteli', 'Yüksek Yan', 'Açık'];
-  } else if (vehicle == 'TIR') {
-    return ['Kapalı', 'Tenteli', 'Lowbed', 'Açık'];
+// YARDIMCI FONKSİYON: ENUM Kodlarını Türkçeleştirir
+String _translate(String code) {
+  switch (code) {
+    case 'UZUN_PANELVAN': return 'Uzun Panelvan';
+    case '6_TEKER': return '6 Teker';
+    case '8_TEKER': return '8 Teker';
+    case '10_TEKER': return '10 Teker';
+    case 'KIRKAYAK': return 'Kırkayak';
+    case 'YUKSEK_YAN': return 'Yüksek Yan Kasa';
+    case 'ACIK': return 'Açık Kasa';
+    case 'LOWBED': return 'Lowbed';
+    case 'STANDART': return 'Standart Kasa';
+    case 'TENTELI': return 'Tenteli Kasa';
+    case 'FRIGO': return 'Frigo Kasa';
+    case 'KAPALI': return 'Kapalı Kasa';
+    case 'DAMPERLI': return 'Damperli Kasa';
+    case 'KONTEYNER': return 'Konteyner';
+    default: return code;
   }
-  return [];
 }
 
-const List<String> loadTypes = ['PALET', 'KOLI', 'CUVAL', 'DOKME', 'MAKINE', 'GENEL'];
+// YARDIMCI FONKSİYON: Durum Metinlerini Standartlaştırır
+String _getStatusText(String status, bool isShipper) {
+    switch (status) {
+      case 'PUBLISHED':
+        return isShipper ? "Yayında (Pazarda)" : "Yol Atanmadı";
+      case 'BOOKED':
+        return isShipper ? "Şoför Atandı (Yolda)" : "Aktif Sefer";
+      case 'COMPLETED':
+        return "Teslim Edildi";
+      case 'CANCELED':
+        return "İptal Edildi";
+      default:
+        return status;
+    }
+}
 
-// 81 İLİN KOORDİNATLARI
-final Map<String, LatLng> cityCoords = {
-  'Adana': const LatLng(37.0000, 35.3213), 'Ankara': const LatLng(39.9208, 32.8541), 'İstanbul': const LatLng(41.0082, 28.9784),
-  'İzmir': const LatLng(38.4237, 27.1428), 'Bursa': const LatLng(40.1885, 29.0610), 'Antalya': const LatLng(36.8969, 30.7133),
-  // ... (Diğer iller harita seçiciden geldiği için burası kısa tutulabilir)
-};
-
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Supabase.initialize(url: SU_URL, anonKey: SU_KEY);
   runApp(const MyApp());
@@ -80,8 +92,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _userC = TextEditingController();
-  final TextEditingController _passC = TextEditingController();
+  final TextEditingController _userC = TextEditingController(text: "firma");
+  final TextEditingController _passC = TextEditingController(text: "123");
   bool _isLoading = false;
 
   void _attemptLogin() {
@@ -104,12 +116,16 @@ class _LoginScreenState extends State<LoginScreen> {
     currentUserRole = role;
     currentUserName = name;
     currentUserId = id;
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
+    if (mounted) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MainScreen()));
+    }
   }
 
   void _showError(String msg) {
     setState(() => _isLoading = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    }
   }
 
   @override
@@ -172,8 +188,8 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _idx = 0;
-  List<Map<String, dynamic>> _loads = [];
-  List<Map<String, dynamic>> _myJobs = [];
+  List<Map<String, dynamic>> _loads = []; 
+  List<Map<String, dynamic>> _myJobsOrLoads = []; 
   bool _loading = true;
   
   final MapController _mapController = MapController();
@@ -182,7 +198,45 @@ class _MainScreenState extends State<MainScreen> {
   LatLng? _myLocation;
 
   @override
-  void initState() { super.initState(); _fetch(); _locateUser(); }
+  void initState() { 
+    super.initState(); 
+    _fetchAll(); 
+    _fetchMyJobsOrLoads();
+    _locateUser(); 
+  }
+
+  Future<void> _fetchAll() async {
+    setState(() => _loading = true);
+    String postTypeFilter = currentUserRole == 'SHIPPER' ? 'DRIVER' : 'LOAD';
+    try {
+      final query = Supabase.instance.client.from('loads')
+          .select()
+          .eq('status', 'PUBLISHED')
+          .eq('post_type', postTypeFilter) 
+          .order('created_at', ascending: false);
+      final data = await query;
+      if (mounted) setState(() => _loads = List<Map<String, dynamic>>.from(data));
+    } catch (e) { 
+      debugPrint("İlan Pazarı Hatası: $e"); 
+    } finally { 
+      if (mounted) setState(() => _loading = false); 
+    }
+  }
+
+  Future<void> _fetchMyJobsOrLoads() async {
+    if (currentUserId == 0) return;
+    String idColumn = currentUserRole == 'CARRIER' ? 'carrier_id' : 'shipper_id';
+    try {
+      var query = Supabase.instance.client.from('loads').select().eq(idColumn, currentUserId);
+      if (currentUserRole == 'CARRIER') {
+          query = query.eq('status', 'BOOKED'); 
+      }
+      final data = await query.order('created_at', ascending: false);
+      if (mounted) setState(() => _myJobsOrLoads = List<Map<String, dynamic>>.from(data));
+    } catch (e) { 
+      debugPrint("Sefer/Yük Hatası: $e"); 
+    }
+  }
 
   Future<void> _locateUser() async {
     try {
@@ -198,64 +252,26 @@ class _MainScreenState extends State<MainScreen> {
     } catch (e) { debugPrint("Konum: $e"); }
   }
 
-  Future<void> _fetch() async {
-    setState(() => _loading = true);
-    try {
-      final data = await Supabase.instance.client.from('loads').select().eq('status', 'PUBLISHED').order('created_at', ascending: false);
-      
-      // --- FAZ 3.5: GÖRÜNÜRLÜK MANTIĞI (FİLTRELEME) ---
-      List<Map<String, dynamic>> rawData = List<Map<String, dynamic>>.from(data);
-      List<Map<String, dynamic>> filteredData = [];
-
-      if (currentUserRole == 'SHIPPER') {
-        // Şirket: Kendi yüklerini VE Boş Sürücüleri görür
-        filteredData = rawData.where((item) {
-          bool isMyLoad = item['post_type'] == 'LOAD' && item['shipper_id'] == currentUserId;
-          bool isDriverAd = item['post_type'] == 'DRIVER';
-          return isMyLoad || isDriverAd;
-        }).toList();
-      } else {
-        // Sürücü: Sadece Yükleri görür (Diğer sürücüleri görmez)
-        filteredData = rawData.where((item) => item['post_type'] == 'LOAD').toList();
-      }
-
-      setState(() => _loads = filteredData);
-      await _fetchMyJobs();
-
-    } catch (e) { debugPrint("$e"); } finally { setState(() => _loading = false); }
-  }
-
-  Future<void> _fetchMyJobs() async {
-    try {
-      // Seferlerim (Sürücü) veya Yüklerim (Şirket - Rezerve Olanlar vs)
-      // Şimdilik basit tutuyoruz, sürücüye atananlar:
-      if (currentUserRole == 'CARRIER') {
-         final data = await Supabase.instance.client.from('loads').select().eq('carrier_id', currentUserId).eq('status', 'BOOKED');
-         setState(() => _myJobs = List<Map<String, dynamic>>.from(data));
-      } else {
-         // Şirket "Yüklerim" (Örnek: Yayındakiler dışındakiler)
-         // Şimdilik boş bırakıyoruz, talep olursa eklenir.
-      }
-    } catch (e) { debugPrint("Sefer hatası: $e"); }
-  }
-
   Future<void> _getRealRoute(LatLng start, LatLng end) async {
-    setState(() { _routePoints = []; });
+    if (mounted) setState(() { _routePoints = []; });
     try {
       final url = Uri.parse('http://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson');
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final geometry = data['routes'][0]['geometry']['coordinates'] as List;
-        setState(() {
+        if (mounted) setState(() {
           _routePoints = geometry.map((p) => LatLng(p[1], p[0])).toList();
         });
       }
-    } catch (e) { setState(() { _routePoints = [start, end]; }); }
+    } catch (e) { 
+      debugPrint("Rota çekme hatası: $e");
+      if (mounted) setState(() { _routePoints = [start, end]; }); 
+    }
   }
 
   void _zoomToRoute(Map<String, dynamic> load) {
-    setState(() => _selectedLoad = load);
+    if (mounted) setState(() => _selectedLoad = load);
     LatLng p1 = LatLng(load['pickup_lat'], load['pickup_lng']);
     LatLng p2 = LatLng(load['delivery_lat'], load['delivery_lng']);
     _mapController.fitCamera(CameraFit.bounds(bounds: LatLngBounds(p1, p2), padding: const EdgeInsets.all(80)));
@@ -274,16 +290,21 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     bool isShipper = currentUserRole == 'SHIPPER';
+    List<Widget> screens = [_map(), _list(), _inbox(), _myJobsOrLoadsScreen(), _profile()];
+    int currentIdx = _idx; 
+    
+    List<NavigationDestination> destinations = [
+        const NavigationDestination(icon: Icon(Icons.map_outlined), label: "Harita"), 
+        const NavigationDestination(icon: Icon(Icons.list_alt), label: "İlanlar"), 
+        const NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: "Mesajlar"), 
+        NavigationDestination(icon: Icon(Icons.local_shipping_outlined), label: isShipper ? "Yüklerim" : "Seferlerim"), 
+        const NavigationDestination(icon: Icon(Icons.person_outline), label: "Profil"), 
+    ];
+
     return Scaffold(
-      body: IndexedStack(index: _idx, children: [
-        _map(), 
-        _list(), 
-        _inbox(), 
-        _myJobsScreen(),
-        _profile()
-      ]),
+      body: IndexedStack(index: currentIdx, children: screens),
       
-      floatingActionButton: (_idx < 2) 
+      floatingActionButton: (isShipper && (currentIdx == 0 || currentIdx == 1 || currentIdx == 3)) || (!isShipper && (currentIdx == 0 || currentIdx == 1))
         ? FloatingActionButton.extended(
             onPressed: _addDialog, 
             label: Text(isShipper ? "YÜK İLANI VER" : "BOŞUM İLANI VER", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -293,21 +314,17 @@ class _MainScreenState extends State<MainScreen> {
         : null,
         
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _idx,
+        selectedIndex: currentIdx,
         onDestinationSelected: (i) => setState(() => _idx = i),
         backgroundColor: Colors.white,
-        destinations: [
-          const NavigationDestination(icon: Icon(Icons.map_outlined), label: "Harita"),
-          const NavigationDestination(icon: Icon(Icons.list_alt), label: "Pazar"),
-          const NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: "Mesajlar"),
-          NavigationDestination(icon: Icon(isShipper ? Icons.inventory : Icons.local_shipping_outlined), label: isShipper ? "Yüklerim" : "Seferlerim"),
-          const NavigationDestination(icon: Icon(Icons.person_outline), label: "Profil"),
-        ],
+        destinations: destinations,
       ),
     );
   }
 
   Widget _map() {
+    bool isShipper = currentUserRole == 'SHIPPER';
+    List<Map<String, dynamic>> markersList = isShipper ? _myJobsOrLoads : _loads;
     return Stack(
       children: [
         FlutterMap(
@@ -324,9 +341,9 @@ class _MainScreenState extends State<MainScreen> {
             if (_myLocation != null)
               MarkerLayer(markers: [Marker(point: _myLocation!, width: 60, height: 60, child: Container(decoration: BoxDecoration(color: Colors.blue.withOpacity(0.2), shape: BoxShape.circle), child: Center(child: Container(width: 20, height: 20, decoration: BoxDecoration(color: Colors.blue, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3))))))]),
 
-            MarkerLayer(markers: _loads.map((load) {
-              bool isDriverPost = load['post_type'] == 'DRIVER';
+            MarkerLayer(markers: markersList.map((load) {
               bool isSelected = _selectedLoad == load;
+              Color markerColor = load['post_type'] == 'LOAD' ? Colors.orange[800]! : Colors.green[700]!;
               return Marker(
                 point: LatLng(load['pickup_lat'] ?? 39.0, load['pickup_lng'] ?? 35.0),
                 width: isSelected ? 90 : 70, height: isSelected ? 90 : 70,
@@ -338,13 +355,13 @@ class _MainScreenState extends State<MainScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [const BoxShadow(color: Colors.black26, blurRadius: 5)]),
-                        child: Text(isDriverPost ? "BOŞ" : "${NumberFormat.compact().format(load['price'])}₺", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDriverPost ? Colors.green : Colors.orange[800])),
+                        child: Text(load['post_type'] == 'DRIVER' ? "BOŞ" : "${NumberFormat.compact().format(load['price'])}₺", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: markerColor)),
                       ),
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: isDriverPost ? Colors.green : Colors.orange[800], shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2), boxShadow: [const BoxShadow(color: Colors.black38, blurRadius: 5)]),
-                        child: Icon(isDriverPost ? Icons.local_shipping : Icons.inventory_2, color: Colors.white, size: isSelected ? 30 : 20),
+                        decoration: BoxDecoration(color: markerColor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2), boxShadow: [const BoxShadow(color: Colors.black38, blurRadius: 5)]),
+                        child: Icon(load['post_type'] == 'DRIVER' ? Icons.local_shipping : Icons.inventory_2, color: Colors.white, size: isSelected ? 30 : 20),
                       ),
                     ],
                   ),
@@ -358,23 +375,24 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _list() {
+    bool isShipper = currentUserRole == 'SHIPPER';
     if(_loading) return const Center(child: CircularProgressIndicator());
-    if(_loads.isEmpty) return const Center(child: Text("Liste boş."));
+    List<Map<String, dynamic>> displayList = _loads; 
+    String title = isShipper ? "Boş Araç Pazarı" : "Yük Pazarı";
+    if(displayList.isEmpty) return Center(child: Text(isShipper ? "Yayınlanmış boş araç ilanı yok." : "Yayınlanmış yük ilanı yok."));
     return Scaffold(
-      appBar: AppBar(title: const Text("Pazar Yeri")),
+      appBar: AppBar(title: Text(title)),
       body: ListView.builder(
         padding: const EdgeInsets.all(15),
-        itemCount: _loads.length,
+        itemCount: displayList.length,
         itemBuilder: (ctx, i) {
-          final load = _loads[i];
-          bool isDriverPost = load['post_type'] == 'DRIVER';
+          final load = displayList[i];
           return Card(
             margin: const EdgeInsets.only(bottom: 10),
             child: ListTile(
-              leading: CircleAvatar(backgroundColor: isDriverPost ? Colors.green[100] : Colors.amber[100], child: Icon(isDriverPost ? Icons.local_shipping : Icons.inventory_2, color: Colors.black)),
               title: Text(load['title'] ?? 'İlan', style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text("${load['pickup_address']} -> ${load['delivery_address']}"),
-              trailing: Text("${NumberFormat.compact().format(load['price'])}₺", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              trailing: Text("${NumberFormat.compact().format(load['price'])}₺", style: TextStyle(color: load['post_type'] == 'LOAD' ? Colors.green : Colors.blue, fontWeight: FontWeight.bold)),
               onTap: () { _zoomToRoute(load); _showDetails(load); },
             ),
           );
@@ -383,26 +401,40 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _inbox() => Scaffold(appBar: AppBar(title: const Text("Mesajlar")), body: const Center(child: Text("Mesaj kutusu yakında.")));
+  Widget _inbox() => Scaffold(appBar: AppBar(title: const Text("Mesajlar (Geliştiriliyor)")), body: const Center(child: Text("Mesaj kutusu yakında. İlanlar üzerinden mesajlaşma mantığı kurulacak.")));
 
-  // --- SEFERLERİM / YÜKLERİM EKRANI ---
-  Widget _myJobsScreen() {
-    if (currentUserRole == 'SHIPPER') return const Center(child: Text("Yüklerim ekranı yapım aşamasında."));
-    if (_myJobs.isEmpty) return const Center(child: Text("Aktif sefer yok."));
+  Widget _myJobsOrLoadsScreen() {
+    bool isShipper = currentUserRole == 'SHIPPER';
+    if (_myJobsOrLoads.isEmpty) {
+      return Center(child: Text(isShipper ? "Hiç yük ilanı vermediniz." : "Aktif atanmış seferiniz yok."));
+    }
+    String title = isShipper ? "Yayınladığım Yükler" : "Aktif Seferlerim";
     return Scaffold(
-      appBar: AppBar(title: const Text("Seferlerim")),
+      appBar: AppBar(title: Text(title)),
       body: ListView.builder(
         padding: const EdgeInsets.all(15),
-        itemCount: _myJobs.length,
+        itemCount: _myJobsOrLoads.length,
         itemBuilder: (ctx, i) {
-          final job = _myJobs[i];
+          final jobOrLoad = _myJobsOrLoads[i];
+          final String status = jobOrLoad['status'] as String? ?? 'PUBLISHED';
+          Color cardColor;
+          if (isShipper) {
+              cardColor = (status == 'BOOKED') ? Colors.blue.shade50 : Colors.grey.shade50;
+          } else {
+              cardColor = Colors.green.shade50;
+          }
+          IconData icon = isShipper ? Icons.assignment : Icons.local_shipping;
+          String statusText = _getStatusText(status, isShipper);
           return Card(
-            color: Colors.green[50],
+            color: cardColor,
             child: ListTile(
-              leading: const Icon(Icons.local_shipping, color: Colors.green),
-              title: Text(job['title']),
-              subtitle: const Text("YOLDA"),
-              trailing: ElevatedButton(onPressed: (){}, child: const Text("TESLİM ET")),
+              leading: Icon(icon, color: isShipper ? Colors.blue : Colors.green),
+              title: Text(jobOrLoad['title']),
+              subtitle: Text(statusText),
+              trailing: isShipper 
+                ? const Icon(Icons.chevron_right)
+                : ElevatedButton(onPressed: (){}, child: const Text("TESLİM ET")),
+              onTap: () => _showDetails(jobOrLoad),
             ),
           );
         },
@@ -416,25 +448,37 @@ class _MainScreenState extends State<MainScreen> {
     return await Navigator.push(context, MaterialPageRoute(builder: (context) => const LocationPickerScreen()));
   }
 
-  // --- İLAN EKLEME (YENİ HİYERARŞİ EKLENDİ) ---
+  // --- İLAN EKLEME (TextField/TextFormField hatası düzeltildi) ---
   void _addDialog() {
     final _formKey = GlobalKey<FormState>();
     final titleC = TextEditingController(); final priceC = TextEditingController(); 
     final wC = TextEditingController(); final vC = TextEditingController();
     final qtyC = TextEditingController(text: '1'); 
     final dimWC = TextEditingController(); final dimLC = TextEditingController(); final dimHC = TextEditingController();
-    
+    final loadTypeC = TextEditingController(); 
+
     Map<String, dynamic>? pickupLoc;
     Map<String, dynamic>? deliveryLoc;
     
-    String? vType; String? bType; String? lType; 
+    String? vType; String? bType;
     bool isStack = false; bool isDriver = currentUserRole == 'CARRIER';
+    
+    List<String> _getFilteredBodyTypes(String? vehicle) {
+      if (['MINIVAN', 'PANELVAN', 'UZUN_PANELVAN'].contains(vehicle)) return ['STANDART'];
+      if (['KAMYONET', '6_TEKER', '8_TEKER', '10_TEKER'].contains(vehicle)) return ['KAPALI', 'TENTELI', 'YUKSEK_YAN', 'ACIK'];
+      if (vehicle == 'TIR' || vehicle == 'KIRKAYAK') return ['KAPALI', 'TENTELI', 'FRIGO', 'LOWBED', 'ACIK', 'DAMPERLI', 'KONTEYNER'];
+      return [];
+    }
 
     showModalBottomSheet(context: context, isScrollControlled: true, builder: (ctx) => Padding(
       padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
       child: StatefulBuilder(builder: (context, setState) {
-        // Seçilen araca göre kasa tiplerini filtrele
-        List<String> availableBodyTypes = getBodyTypesForVehicle(vType);
+        List<String> filteredBodyTypes = _getFilteredBodyTypes(vType);
+        if (bType != null && !filteredBodyTypes.contains(bType)) {
+          bType = filteredBodyTypes.cast<String?>().firstWhere((element) => element == 'STANDART', orElse: () => null);
+        } else if (bType == null && filteredBodyTypes.contains('STANDART')) {
+           bType = 'STANDART';
+        }
 
         return Container(
           height: MediaQuery.of(ctx).size.height * 0.9,
@@ -451,22 +495,22 @@ class _MainScreenState extends State<MainScreen> {
                 
                 const Text("Rota (Zorunlu)", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
                 const SizedBox(height: 10),
-                _locationSelector("Nereden", pickupLoc, () async { final loc = await _pickLocation(context); if(loc != null) setState(() => pickupLoc = loc); }),
+                _locationSelector("Nereden", pickupLoc, () async { final loc = await _pickLocation(context); if(loc != null && mounted) setState(() => pickupLoc = loc); }),
                 const SizedBox(height: 10),
-                _locationSelector("Nereye", deliveryLoc, () async { final loc = await _pickLocation(context); if(loc != null) setState(() => deliveryLoc = loc); }),
+                _locationSelector(isDriver ? "Gideceğim Şehir" : "Nereye", deliveryLoc, () async { final loc = await _pickLocation(context); if(loc != null && mounted) setState(() => deliveryLoc = loc); }),
                 if(pickupLoc == null || deliveryLoc == null) const Padding(padding: EdgeInsets.all(8.0), child: Text("Lütfen rota seçiniz *", style: TextStyle(color: Colors.red, fontSize: 12))),
 
                 const SizedBox(height: 20),
-                TextFormField(controller: titleC, decoration: const InputDecoration(labelText: "Başlık *", border: OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null),
+                TextFormField(controller: titleC, decoration: InputDecoration(labelText: isDriver ? "Durum *" : "Başlık *", border: const OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null),
                 const SizedBox(height: 10),
                 Row(children: [
-                  Expanded(child: TextFormField(controller: priceC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Fiyat (TL) *", border: OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null)),
+                  Expanded(child: TextFormField(controller: priceC, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: isDriver ? "KM Başı Ücret *" : "Fiyat (TL) *", border: const OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null)),
                   const SizedBox(width: 10),
-                  Expanded(child: TextFormField(controller: wC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Ağırlık (KG) *", border: OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null)),
+                  Expanded(child: TextFormField(controller: wC, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: isDriver ? "Kapasite (KG) *" : "Ağırlık (KG) *", border: const OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null)),
                 ]),
                 
                 const SizedBox(height: 10),
-                // SADECE ŞİRKET İÇİN DETAYLI ÖLÇÜLER ZORUNLU
+                
                 if(!isDriver) ...[
                   const Text("Ölçüler & Adet (Zorunlu)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   Row(children: [
@@ -477,54 +521,57 @@ class _MainScreenState extends State<MainScreen> {
                   ]),
                   const SizedBox(height: 10),
                   Row(children: [
-                    Expanded(child: DropdownButtonFormField(value: lType, hint: const Text("Yük Tipi *"), items: loadTypes.map((e)=>DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 12)))).toList(), onChanged: (v)=>setState(()=>lType=v), decoration: const InputDecoration(border: OutlineInputBorder()), validator: (v) => v == null ? "Seçiniz" : null)),
+                    // HATA DÜZELTİLDİ: TextField -> TextFormField yapıldı ve validator çalışır hale geldi.
+                    Expanded(child: TextFormField(controller: loadTypeC, decoration: const InputDecoration(labelText: "Yük Tanımı (Örn: Palet, Ev Eşyası) *", border: OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null)),
                     const SizedBox(width: 10),
-                    Expanded(child: TextFormField(controller: vC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Hacim m³ (Opsiyonel)", border: OutlineInputBorder()))),
+                    Expanded(child: TextField(controller: vC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Hacim m³ (Opsiyonel)", border: const OutlineInputBorder()))),
                   ]),
                 ],
 
                 const SizedBox(height: 10),
-                // ARAÇ VE KASA SEÇİMİ (DİNAMİK)
                 Row(children: [
-                  Expanded(child: DropdownButtonFormField(value: vType, hint: const Text("Araç *"), items: vehicleList.map((e)=>DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 12)))).toList(), onChanged: (v) { 
-                    setState(() { vType = v; bType = null; }); // Araç değişince kasayı sıfırla
-                  }, decoration: const InputDecoration(border: OutlineInputBorder()), validator: (v) => v == null ? "Seçiniz" : null)),
-                  
+                  Expanded(child: DropdownButtonFormField<String>(
+                    value: vType, 
+                    hint: const Text("Araç *"), 
+                    items: vehicleTypes.map((e) => DropdownMenuItem(value: e, child: Text(_translate(e)))).toList(), 
+                    onChanged: (v) => setState(() {
+                      vType = v;
+                      bType = _getFilteredBodyTypes(v).cast<String?>().firstWhere((element) => element == 'STANDART', orElse: () => null);
+                    }), 
+                    decoration: const InputDecoration(border: const OutlineInputBorder()), 
+                    validator: (v) => v == null ? "Seçiniz" : null)),
                   const SizedBox(width: 10),
-                  
-                  // Kasa Tipi (Sadece araç seçildiyse ve kasa tipi varsa göster)
-                  Expanded(child: IgnorePointer(
-                    ignoring: availableBodyTypes.isEmpty,
-                    child: DropdownButtonFormField(
-                      value: bType, 
-                      hint: Text(availableBodyTypes.isEmpty ? "Standart" : "Kasa *"), 
-                      items: availableBodyTypes.map((e)=>DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 12)))).toList(), 
-                      onChanged: (v)=>setState(()=>bType=v), 
-                      decoration: InputDecoration(
-                        border: const OutlineInputBorder(),
-                        filled: availableBodyTypes.isEmpty, 
-                        fillColor: availableBodyTypes.isEmpty ? Colors.grey[200] : null
-                      ),
-                      validator: (v) => (availableBodyTypes.isNotEmpty && v == null) ? "Seçiniz" : null // Sadece seçenek varsa zorunlu
-                    ),
-                  )),
+                  Expanded(child: DropdownButtonFormField<String>(
+                    value: bType, 
+                    hint: const Text("Kasa *"), 
+                    items: filteredBodyTypes.map((e) => DropdownMenuItem(value: e, child: Text(_translate(e)))).toList(), 
+                    onChanged: filteredBodyTypes.contains('STANDART') ? null : (v) => setState(() => bType = v), 
+                    decoration: InputDecoration(
+                      border: const OutlineInputBorder(),
+                      enabled: !filteredBodyTypes.contains('STANDART')
+                    ), 
+                    validator: (v) => v == null ? "Seçiniz" : null)),
                 ]),
-                
+
                 if(!isDriver) CheckboxListTile(title: const Text("İstiflenebilir?"), value: isStack, onChanged: (v)=>setState(()=>isStack=v!), contentPadding: EdgeInsets.zero),
 
                 const SizedBox(height: 20),
                 SizedBox(width: double.infinity, height: 55, child: ElevatedButton(onPressed: (){ 
                   if(_formKey.currentState!.validate() && pickupLoc != null && deliveryLoc != null) {
-                    // Kasa tipi zorunluluğu kontrolü (eğer liste boş değilse)
-                    if (availableBodyTypes.isNotEmpty && bType == null) {
-                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen Kasa Tipi Seçin!"), backgroundColor: Colors.red));
+                    if (vType == null || bType == null) {
+                       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen Araç ve Kasa seçiniz!"), backgroundColor: Colors.red));
+                       return;
+                    }
+                    if (!isDriver && loadTypeC.text.isEmpty) { 
+                       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen Yük Tipini Belirtin!"), backgroundColor: Colors.red));
                        return;
                     }
                     
-                    // Kaydet
-                    _saveLoad(titleC.text, double.tryParse(priceC.text)??0, int.tryParse(wC.text)??0, double.tryParse(vC.text)??0, pickupLoc!, deliveryLoc!, vType!, bType ?? 'STANDART', lType ?? 'GENEL', isStack, isDriver ? 'DRIVER' : 'LOAD', qty: int.tryParse(qtyC.text), dw: int.tryParse(dimWC.text), dl: int.tryParse(dimLC.text), dh: int.tryParse(dimHC.text));
+                    String finalBType = bType ?? filteredBodyTypes.firstWhere((element) => true, orElse: () => 'STANDART');
+
+                    _saveLoad(titleC.text, double.tryParse(priceC.text)??0, int.tryParse(wC.text)??0, double.tryParse(vC.text)??0, pickupLoc!, deliveryLoc!, vType ?? 'TIR', finalBType, loadTypeC.text, isStack, isDriver ? 'DRIVER' : 'LOAD', qty: int.tryParse(qtyC.text), dw: int.tryParse(dimWC.text), dl: int.tryParse(dimLC.text), dh: int.tryParse(dimHC.text));
                   } else {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen zorunlu alanları doldurun!"), backgroundColor: Colors.red));
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen zorunlu alanları ve rotayı doldurun!"), backgroundColor: Colors.red));
                   }
                 }, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white), child: const Text("YAYINLA", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))))
               ]),
@@ -541,81 +588,182 @@ class _MainScreenState extends State<MainScreen> {
       child: Container(
         padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(color: Colors.white, border: Border.all(color: loc != null ? Colors.green : Colors.redAccent), borderRadius: BorderRadius.circular(12)),
-        child: Row(children: [Icon(Icons.map, color: loc != null ? Colors.green : Colors.red), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)), Text(loc != null ? loc['address'] : "Haritadan Seçmek İçin Dokun *", style: TextStyle(fontWeight: FontWeight.bold, color: loc != null ? Colors.black : Colors.red, fontSize: 16))])), const Icon(Icons.chevron_right)]),
+        child: Row(children: [Icon(Icons.map, color: loc != null ? Colors.green : Colors.red), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)), Text(loc != null ? loc['address'] : "Haritadan Seçmek İçin Dokun *", style: TextStyle(fontWeight: FontWeight.bold, color: loc != null ? Colors.black : Colors.red, fontSize: 16))])), const Icon(Icons.chevron_right)]),
       ),
     );
   }
 
   Future<void> _saveLoad(String t, double p, int w, double vol, Map<String, dynamic> pLoc, Map<String, dynamic> dLoc, String vt, String bt, String lt, bool stack, String type, {int? qty, int? dw, int? dl, int? dh}) async {
-    await Supabase.instance.client.from('loads').insert({
+    final int posterId = currentUserId; 
+    
+    final Map<String, dynamic> loadData = {
       'title': t, 'price': p, 'weight_kg': w, 'volume_m3': vol, 'load_type': lt, 'is_stackable': stack,
       'pickup_address': pLoc['address'], 'delivery_address': dLoc['address'], 'pickup_lat': pLoc['lat'], 'pickup_lng': pLoc['lng'], 'delivery_lat': dLoc['lat'], 'delivery_lng': dLoc['lng'],
-      'required_vehicle': vt, 'required_body': bt, 'status': 'PUBLISHED', 'shipper_id': 1, 'description': vt, 'post_type': type,
+      'required_vehicle': vt, 'required_body': bt, 'status': 'PUBLISHED', 
+      'shipper_id': posterId,
+      'post_type': type,
       'quantity': qty??1, 'dim_width': dw??0, 'dim_length': dl??0, 'dim_height': dh??0
-    });
-    _fetch(); Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("İlan Başarıyla Yayınlandı!")));
+    };
+    
+    try {
+        await Supabase.instance.client.from('loads').insert(loadData);
+        _fetchAll(); 
+        _fetchMyJobsOrLoads(); 
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("İlan Başarıyla Yayınlandı!"), backgroundColor: Colors.green));
+        }
+    } catch (e) {
+        debugPrint("İlan yayınlama hatası: $e");
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("İlan yayınlanamadı. Hata: ${e.toString()}"), backgroundColor: Colors.red));
+    }
   }
 
-  // --- DETAY PENCERESİ ---
   void _showDetails(Map<String, dynamic> load) {
-    showModalBottomSheet(
-      context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) => DraggableScrollableSheet(
-      initialChildSize: 0.45, minChildSize: 0.2, maxChildSize: 0.9,
-      builder: (_, controller) => Container(
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        padding: const EdgeInsets.all(20),
-        child: ListView(controller: controller, children: [
-          Center(child: Container(width: 40, height: 4, color: Colors.grey[300], margin: const EdgeInsets.only(bottom: 20))),
-          Text(load['title'] ?? '', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, children: [Chip(label: Text(load['required_body'] ?? ''), backgroundColor: Colors.blue[50]), if(load['is_stackable'] == true) const Chip(label: Text("İstiflenebilir"), backgroundColor: Colors.orangeAccent), Chip(label: Text("${load['load_type']}"), backgroundColor: Colors.purple[50])]),
-          const Divider(height: 30),
-          if (load['quantity'] != null && load['dim_width'] != null && load['dim_width'] > 0) ...[
-            const Text("Yük Ebatları & Adet", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-            const SizedBox(height: 5),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [_miniBox("${load['quantity']} Adet", Icons.grid_view), _miniBox("${load['dim_width']}x${load['dim_length']}x${load['dim_height']} cm", Icons.aspect_ratio)]),
+    if (mounted) {
+      showModalBottomSheet(
+        context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.45, minChildSize: 0.2, maxChildSize: 0.9,
+        builder: (_, controller) => Container(
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          padding: const EdgeInsets.all(20),
+          child: ListView(controller: controller, children: [
+            Center(child: Container(width: 40, height: 4, color: Colors.grey[300], margin: const EdgeInsets.only(bottom: 20))),
+            Text(load['title'] ?? '', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, children: [
+              Chip(label: Text(_translate(load['required_body'] ?? 'Bilinmiyor')), backgroundColor: Colors.blue[50]), 
+              if(load['is_stackable'] == true) const Chip(label: Text("İstiflenebilir"), backgroundColor: Colors.orangeAccent), 
+              Chip(label: Text(load['load_type'] ?? 'Yük Tanımı Yok'), backgroundColor: Colors.purple[50]) 
+            ]),
+            const Divider(height: 30),
+            
+            if (load['quantity'] != null && load['dim_width'] != null && load['dim_width'] > 0) ...[
+              const Text("Yük Ebatları & Adet", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+              const SizedBox(height: 5),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [_miniBox("${load['quantity']} Adet", Icons.grid_view), _miniBox("${load['dim_width']}x${load['dim_length']}x${load['dim_height']} cm", Icons.aspect_ratio)]),
+              const SizedBox(height: 20),
+            ],
+            
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _infoRow(Icons.circle, Colors.green, "Nereden", load['pickup_address']), 
+                _verticalLine(), 
+                _infoRow(Icons.circle, Colors.red, "Nereye", load['delivery_address'] ?? 'Bilinmiyor'),
+              ],
+            ),
             const SizedBox(height: 20),
-          ],
-          _infoRow(Icons.circle, Colors.green, "Nereden", load['pickup_address']), _verticalLine(), _infoRow(Icons.circle, Colors.red, "Nereye", load['delivery_address'] ?? 'Bilinmiyor'),
-          const SizedBox(height: 20),
-          Row(children: [Expanded(child: _boxInfo(load['post_type']=='DRIVER'?"Kapasite":"Ağırlık", "${load['weight_kg']} KG", Icons.scale)), const SizedBox(width: 10), Expanded(child: _boxInfo("Araç", "${load['required_vehicle']}", Icons.local_shipping))]),
-          const SizedBox(height: 30),
-          Text("${NumberFormat.compact().format(load['price'])}₺", style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: Colors.green)),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(onPressed: () => _openGoogleMaps(load['pickup_lat'], load['pickup_lng'], load['delivery_lat'], load['delivery_lng']), icon: const Icon(Icons.map), label: const Text("YOL TARİFİ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
-            const SizedBox(width: 10),
-            Expanded(child: OutlinedButton.icon(onPressed: () => _openChatDialog(load), icon: const Icon(Icons.chat_bubble_outline), label: const Text("MESAJ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
-          ]),
-          const SizedBox(height: 10),
-          if(currentUserRole == 'SHIPPER') 
-            SizedBox(width: double.infinity, child: ElevatedButton.icon(onPressed: () => _delete(load['id']), icon: const Icon(Icons.delete), label: const Text("İLANI SİL"), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15))))
-          else if (currentUserRole == 'CARRIER' && load['post_type'] != 'DRIVER')
-             SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => _acceptLoad(load), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15)), child: const Text("YÜKÜ AL (REZERVE ET)")))
-        ]),
-      )
-    )).whenComplete(() => _clearRoute()); 
-  }
 
-  void _openGoogleMaps(double? pLat, double? pLng, double? dLat, double? dLng) async {
-    if(pLat == null || dLat == null) return;
-    final uri = Uri.parse("https://www.google.com/maps/dir/?api=1&origin=$pLat,$pLng&destination=$dLat,$dLng&travelmode=driving");
-    try { await launchUrl(uri, mode: LaunchMode.externalApplication); } catch (e) { debugPrint("Harita hatası: $e"); }
+            Row(children: [
+              Expanded(child: _boxInfo(load['post_type']=='DRIVER'?"Kapasite":"Ağırlık", "${load['weight_kg']} KG", Icons.scale)), 
+              Expanded(child: _boxInfo("Araç", _translate(load['required_vehicle']), Icons.local_shipping)) 
+            ]),
+            
+            const SizedBox(height: 30),
+            Text(
+              load['post_type'] == 'DRIVER' 
+                ? "KM/ ${NumberFormat.compact().format(load['price'])}₺"
+                : NumberFormat.currency(locale: 'tr', symbol: '₺').format(load['price']), 
+              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: Colors.green)
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: OutlinedButton.icon(onPressed: () => _openGoogleMaps(load['pickup_lat'], load['pickup_lng'], load['delivery_lat'], load['delivery_lng']), icon: const Icon(Icons.map), label: const Text("YOL TARİFİ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
+              const SizedBox(width: 10),
+              Expanded(child: OutlinedButton.icon(onPressed: () => _openChatDialog(load), icon: const Icon(Icons.chat_bubble_outline), label: const Text("MESAJ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
+            ]),
+            const SizedBox(height: 10),
+            if(currentUserRole == 'SHIPPER' && load['shipper_id'] == currentUserId) 
+              SizedBox(width: double.infinity, child: ElevatedButton.icon(
+                onPressed: () => _delete(load['id']), 
+                icon: const Icon(Icons.delete), 
+                label: const Text("İLANI SİL"), 
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15))
+              ))
+            else if (currentUserRole == 'CARRIER' && load['post_type'] != 'DRIVER')
+               SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => _acceptLoad(load), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15)), child: const Text("YÜKÜ AL (REZERVE ET)")))
+          ]),
+        )
+      )).whenComplete(() => _clearRoute()); 
+    }
   }
 
   Future<void> _acceptLoad(Map<String, dynamic> load) async {
-    await Supabase.instance.client.from('loads').update({'status': 'BOOKED', 'carrier_id': currentUserId}).eq('id', load['id']);
-    _fetch(); Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Yük Rezerve Edildi!"), backgroundColor: Colors.green));
+    try {
+      await Supabase.instance.client.from('loads')
+          .update({'status': 'BOOKED', 'carrier_id': currentUserId})
+          .eq('id', load['id']);
+      _fetchAll(); 
+      _fetchMyJobsOrLoads();
+      if (mounted) {
+        Navigator.pop(context); 
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Yük Rezerve Edildi!"), backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      debugPrint("Yük kabul etme hatası: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Rezerve Hatası: ${e.toString()}"), backgroundColor: Colors.red));
+      }
+    }
   }
 
-  void _openChatDialog(Map<String, dynamic> load) { showModalBottomSheet(context: context, isScrollControlled: true, builder: (ctx) => _ChatScreen(loadTitle: load['title'] ?? 'İlan', price: load['price'], loadId: load['id'])); }
-  Future<void> _delete(int id) async { await Supabase.instance.client.from('loads').delete().eq('id', id); setState(() => _selectedLoad = null); _fetch(); Navigator.pop(context); }
+  Future<void> _delete(int id) async { 
+    try {
+      await Supabase.instance.client.from('loads').delete().eq('id', id); 
+      if (mounted) setState(() => _selectedLoad = null); 
+      _fetchAll(); 
+      _fetchMyJobsOrLoads();
+      if (mounted) {
+        Navigator.pop(context); 
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("🗑️ İlan Başarıyla Silindi!"), backgroundColor: Colors.orange));
+      }
+    } catch (e) {
+      debugPrint("İlan silme hatası: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Silme Hatası: ${e.toString()}"), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  void _openChatDialog(Map<String, dynamic> load) { 
+    if (mounted) {
+      showModalBottomSheet(
+        context: context, 
+        isScrollControlled: true, 
+        builder: (ctx) => _ChatScreen(loadTitle: load['title'] ?? 'İlan', price: load['price'], loadId: load['id'])
+      ); 
+    }
+  }
+
+  void _openGoogleMaps(double? pLat, double? pLng, double? dLat, double? dLng) async {
+    if(pLat == null || dLat == null || pLng == null || dLng == null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Rota bilgisi eksik. GPS koordinatları bulunamadı."), backgroundColor: Colors.red));
+      return;
+    }
+    final String mapsUrl = "https://www.google.com/maps/dir/?api=1&origin=$pLat,$pLng&destination=$dLat,$dLng&travelmode=driving";
+    final Uri uri = Uri.parse(mapsUrl);
+    try { 
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication); 
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Harita uygulaması açılamadı. Lütfen Google Haritalar'ın yüklü olduğundan emin olun."), backgroundColor: Colors.red));
+      }
+    } catch (e) { 
+      debugPrint("Harita açma hatası: $e"); 
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Harita Hatası: ${e.toString()}"), backgroundColor: Colors.red));
+    }
+  }
+
+  // --- HELPER WIDGET'LAR DÜZELTİLDİ ---
   Widget _infoRow(IconData i, Color c, String l, String v) => Row(children: [Icon(i, size: 14, color: c), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l, style: const TextStyle(color: Colors.grey, fontSize: 10)), Text(v, style: const TextStyle(fontWeight: FontWeight.bold))]))]);
   Widget _verticalLine() => Container(margin: const EdgeInsets.only(left: 6), height: 20, width: 2, color: Colors.grey[200]);
-  Widget _boxInfo(String l, String v, IconData i) => Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(10)), child: Column(children: [Icon(i, size: 20, color: Colors.blueGrey), const SizedBox(height: 5), Text(v, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)), Text(l, style: const TextStyle(fontSize: 10, color: Colors.grey))]));
+  Widget _boxInfo(String l, String v, IconData i) => Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(10)), child: Column(children: [Icon(i, size: 20, color: Colors.blueGrey), const SizedBox(height: 5), Text(v, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), textAlign: TextAlign.center, overflow: TextOverflow.ellipsis), Text(l, style: const TextStyle(fontSize: 10, color: Colors.grey))]));
   Widget _miniBox(String txt, IconData i) => Row(children: [Icon(i, size: 16, color: Colors.black54), const SizedBox(width: 5), Text(txt, style: const TextStyle(fontWeight: FontWeight.bold))]);
+
 }
 
+// Konum Seçici Ekranı
 class LocationPickerScreen extends StatefulWidget { const LocationPickerScreen({super.key}); @override State<LocationPickerScreen> createState() => _LocationPickerScreenState(); }
 class _LocationPickerScreenState extends State<LocationPickerScreen> {
   final MapController _pickerMapController = MapController();
@@ -626,10 +774,10 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   Timer? _debounce;
 
   void _onPositionChanged(MapPosition position, bool hasGesture) { if (position.center != null) _center = position.center!; }
-  Future<void> _getAddress() async { setState(() => _address = "Adres alınıyor..."); try { final url = Uri.parse('https://nominatim.openstreetmap.org/reverse?format=json&lat=${_center.latitude}&lon=${_center.longitude}&zoom=18&addressdetails=1'); final response = await http.get(url, headers: {'User-Agent': 'com.logicore.app'}); if (response.statusCode == 200) { final data = json.decode(response.body); String full = data['display_name'] ?? "Bilinmeyen Konum"; List<String> parts = full.split(','); String short = parts.length > 2 ? "${parts[0]}, ${parts[1]}" : full; if(mounted) setState(() => _address = short); } } catch (e) { if(mounted) setState(() => _address = "Konum: ${_center.latitude.toStringAsFixed(4)}, ${_center.longitude.toStringAsFixed(4)}"); } }
-  Future<void> _searchPlace(String query) async { if (_debounce?.isActive ?? false) _debounce!.cancel(); _debounce = Timer(const Duration(milliseconds: 800), () async { if(query.length < 3) return; final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=5'); final response = await http.get(url, headers: {'User-Agent': 'com.logicore.app'}); if (response.statusCode == 200) { setState(() => _searchResults = json.decode(response.body)); } }); }
+  Future<void> _getAddress() async { if (mounted) setState(() => _address = "Adres alınıyor..."); try { final url = Uri.parse('https://nominatim.openstreetmap.org/reverse?format=json&lat=${_center.latitude}&lon=${_center.longitude}&zoom=18&addressdetails=1'); final response = await http.get(url, headers: {'User-Agent': 'com.logicore.app'}); if (response.statusCode == 200) { final data = json.decode(response.body); String full = data['display_name'] ?? "Bilinmeyen Konum"; List<String> parts = full.split(','); String short = parts.length > 2 ? "${parts[0]}, ${parts[1]}" : full; if(mounted) setState(() => _address = short); } } catch (e) { debugPrint("Adres hatası: $e"); if(mounted) setState(() => _address = "Konum: ${_center.latitude.toStringAsFixed(4)}, ${_center.longitude.toStringAsFixed(4)}"); } }
+  Future<void> _searchPlace(String query) async { if (_debounce?.isActive ?? false) _debounce!.cancel(); _debounce = Timer(const Duration(milliseconds: 800), () async { if(query.length < 3) return; final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=5'); final response = await http.get(url, headers: {'User-Agent': 'com.logicore.app'}); if (response.statusCode == 200 && mounted) { setState(() => _searchResults = json.decode(response.body)); } }); }
 
-  @override Widget build(BuildContext context) { return Scaffold(body: Stack(children: [FlutterMap(mapController: _pickerMapController, options: MapOptions(initialCenter: _center, initialZoom: 12.0, onPositionChanged: _onPositionChanged, onMapEvent: (evt) { if (evt is MapEventMoveEnd) _getAddress(); }), children: [TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')]), const Center(child: Icon(Icons.location_on, size: 50, color: Colors.red)), SafeArea(child: Column(children: [Container(margin: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 10)]), child: Column(children: [TextField(controller: _searchC, decoration: InputDecoration(hintText: "İl, İlçe veya Yer Ara...", prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(icon: const Icon(Icons.close), onPressed: (){ _searchC.clear(); setState(()=>_searchResults=[]); }), border: InputBorder.none, contentPadding: const EdgeInsets.all(15)), onChanged: _searchPlace), if (_searchResults.isNotEmpty) Container(height: 200, color: Colors.white, child: ListView.builder(itemCount: _searchResults.length, itemBuilder: (ctx, i) { final place = _searchResults[i]; return ListTile(title: Text(place['display_name'], maxLines: 1, overflow: TextOverflow.ellipsis), leading: const Icon(Icons.place, color: Colors.grey), onTap: () { final lat = double.parse(place['lat']); final lon = double.parse(place['lon']); _pickerMapController.move(LatLng(lat, lon), 15); setState(() { _center = LatLng(lat, lon); _searchResults = []; _searchC.clear(); }); _getAddress(); FocusScope.of(context).unfocus(); }); }))]))])), Positioned(bottom: 0, left: 0, right: 0, child: Container(padding: const EdgeInsets.all(20), decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text("Seçilen Konum:", style: TextStyle(color: Colors.grey)), Text(_address, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), const SizedBox(height: 15), SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: () { Navigator.pop(context, {'lat': _center.latitude, 'lng': _center.longitude, 'address': _address}); }, style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), child: const Text("BU KONUMU ONAYLA")))])))],),); }
+  @override Widget build(BuildContext context) { return Scaffold(body: Stack(children: [FlutterMap(mapController: _pickerMapController, options: MapOptions(initialCenter: _center, initialZoom: 12.0, onPositionChanged: _onPositionChanged, onMapEvent: (evt) { if (evt is MapEventMoveEnd) _getAddress(); }), children: [TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')]), const Center(child: Icon(Icons.location_on, size: 50, color: Colors.red)), SafeArea(child: Column(children: [Container(margin: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 10)]), child: Column(children: [TextField(controller: _searchC, decoration: InputDecoration(hintText: "İl, İlçe veya Yer Ara...", prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(icon: const Icon(Icons.close), onPressed: (){ _searchC.clear(); if(mounted) setState(()=>_searchResults=[]); }), border: InputBorder.none, contentPadding: const EdgeInsets.all(15)), onChanged: _searchPlace), if (_searchResults.isNotEmpty) Container(height: 200, color: Colors.white, child: ListView.builder(itemCount: _searchResults.length, itemBuilder: (ctx, i) { final place = _searchResults[i]; return ListTile(title: Text(place['display_name'], maxLines: 1, overflow: TextOverflow.ellipsis), leading: const Icon(Icons.place, color: Colors.grey), onTap: () { final lat = double.parse(place['lat']); final lon = double.parse(place['lon']); _pickerMapController.move(LatLng(lat, lon), 15); if(mounted) setState(() { _center = LatLng(lat, lon); _searchResults = []; _searchC.clear(); }); _getAddress(); FocusScope.of(context).unfocus(); }); }))]))])), Positioned(bottom: 0, left: 0, right: 0, child: Container(padding: const EdgeInsets.all(20), decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text("Seçilen Konum:", style: TextStyle(color: Colors.grey)), Text(_address, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), const SizedBox(height: 15), SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: () { if(mounted) Navigator.pop(context, {'lat': _center.latitude, 'lng': _center.longitude, 'address': _address}); }, style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), child: const Text("BU KONUMU ONAYLA")))])))],),); }
 }
 
 class _ChatScreen extends StatefulWidget { final String loadTitle; final dynamic price; final int loadId; const _ChatScreen({required this.loadTitle, required this.price, required this.loadId}); @override State<_ChatScreen> createState() => _ChatScreenState(); }
