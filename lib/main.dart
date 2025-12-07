@@ -9,6 +9,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart'; 
+import 'package:intl/date_symbol_data_local.dart';
+
 
 // --- AYARLAR ---
 const String SU_URL = 'https://ntxofpiomcftqqzvugcr.supabase.co';
@@ -62,6 +64,10 @@ String _getStatusText(String status, bool isShipper) {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // HATA ÇÖZÜMÜ: Türkçe yerel ayar verilerini başlat (LocaleDataException hatası çözümü)
+  await initializeDateFormatting('tr', null); 
+  
   await Supabase.initialize(url: SU_URL, anonKey: SU_KEY);
   runApp(const MyApp());
 }
@@ -95,8 +101,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _userC = TextEditingController(text: "firma");
   final TextEditingController _passC = TextEditingController(text: "123");
   bool _isLoading = false;
-
-  // _LoginScreenState sınıfının içindeki _attemptLogin() fonksiyonu
 
 void _attemptLogin() {
     setState(() => _isLoading = true);
@@ -196,7 +200,16 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _idx = 0;
   List<Map<String, dynamic>> _loads = []; 
-  List<Map<String, dynamic>> _myJobsOrLoads = []; 
+  List<Map<String, dynamic>> _myJobsOrLoads = []; // SHIPPER için kullanılır
+  
+  // CARRIER için yeni ayrılmış listeler (UI ayrımı ve limit kontrolü için)
+  List<Map<String, dynamic>> _activeBookedLoads = []; 
+  List<Map<String, dynamic>> _publishedDriverPosts = [];
+  
+  // Mesaj Kutusu değişkenleri
+  List<Map<String, dynamic>> _inboxThreads = [];
+  bool _loadingInbox = false;
+
   bool _loading = true;
   
   final MapController _mapController = MapController();
@@ -209,6 +222,7 @@ class _MainScreenState extends State<MainScreen> {
     super.initState(); 
     _fetchAll(); 
     _fetchMyJobsOrLoads();
+    _fetchInboxThreads(); 
     _locateUser(); 
   }
 
@@ -229,21 +243,208 @@ class _MainScreenState extends State<MainScreen> {
       if (mounted) setState(() => _loading = false); 
     }
   }
+// _MainScreenState sınıfı içinde
+void _showDetails(Map<String, dynamic> load) {
+    if (mounted) {
+      showModalBottomSheet(
+        context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.45, minChildSize: 0.2, maxChildSize: 0.9,
+        builder: (_, controller) => Container(
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          padding: const EdgeInsets.all(20),
+          child: ListView(controller: controller, children: [
+            Center(child: Container(width: 40, height: 4, color: Colors.grey[300], margin: const EdgeInsets.only(bottom: 20))),
+            Text(load['title'] ?? '', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            
+            // Yük Detayları (Çeviri ve Post Tipi)
+            Wrap(spacing: 8, children: [
+              Chip(label: Text(_translate(load['required_body'] ?? 'Bilinmiyor')), backgroundColor: Colors.blue[50]), 
+              if(load['is_stackable'] == true) const Chip(label: Text("İstiflenebilir"), backgroundColor: Colors.orangeAccent), 
+              Chip(label: Text(load['load_type'] ?? 'Yük Tanımı Yok'), backgroundColor: Colors.purple[50]) 
+            ]),
+            const Divider(height: 30),
+            
+            // Ebatlar
+            if (load['quantity'] != null && load['dim_width'] != null && load['dim_width'] > 0) ...[
+              const Text("Yük Ebatları & Adet", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+              const SizedBox(height: 5),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [_miniBox("${load['quantity']} Adet", Icons.grid_view), _miniBox("${load['dim_width']}x${load['dim_length']}x${load['dim_height']} cm", Icons.aspect_ratio)]),
+              const SizedBox(height: 20),
+            ],
+            
+            // Rota Bilgisi (Helperlar kullanılıyor)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _infoRow(Icons.circle, Colors.green, "Nereden", load['pickup_address']), 
+                _verticalLine(), 
+                _infoRow(Icons.circle, Colors.red, "Nereye", load['delivery_address'] ?? 'Bilinmiyor'),
+              ],
+            ),
+            const SizedBox(height: 20),
 
-  Future<void> _fetchMyJobsOrLoads() async {
+            // Kasa/Ağırlık Bilgisi (Helperlar kullanılıyor)
+            Row(children: [
+              Expanded(child: _boxInfo(load['post_type']=='DRIVER'?"Kapasite":"Ağırlık", "${load['weight_kg']} KG", Icons.scale)), 
+              Expanded(child: _boxInfo("Araç", _translate(load['required_vehicle']), Icons.local_shipping)) 
+            ]),
+            
+            const SizedBox(height: 30),
+            Text(
+              load['post_type'] == 'DRIVER' 
+                ? "KM/ ${NumberFormat.compact().format(load['price'])}₺"
+                : NumberFormat.currency(locale: 'tr', symbol: '₺').format(load['price']), 
+              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: Colors.green)
+            ),
+            const SizedBox(height: 10),
+            
+            // Butonlar
+            Row(children: [
+              Expanded(child: OutlinedButton.icon(onPressed: () => _openGoogleMaps(load['pickup_lat'], load['pickup_lng'], load['delivery_lat'], load['delivery_lng']), icon: const Icon(Icons.map), label: const Text("YOL TARİFİ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
+              const SizedBox(width: 10),
+              Expanded(child: OutlinedButton.icon(onPressed: () => _openChatDialog(load), icon: const Icon(Icons.chat_bubble_outline), label: const Text("MESAJ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
+            ]),
+            const SizedBox(height: 10),
+            
+            // Rol Bazlı Aksiyon Butonları
+            if(currentUserRole == 'SHIPPER' && load['shipper_id'] == currentUserId) 
+              SizedBox(width: double.infinity, child: ElevatedButton.icon(
+                onPressed: () => _delete(load['id']), 
+                icon: const Icon(Icons.delete), 
+                label: const Text("İLANI SİL"), 
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15))
+              ))
+            else if (currentUserRole == 'CARRIER' && load['post_type'] != 'DRIVER')
+               SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => _acceptLoad(load), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15)), child: const Text("YÜKÜ AL (REZERVE ET)")))
+          ]),
+        )
+      )).whenComplete(() => _clearRoute()); 
+    }
+}
+// GÜNCELLENDİ: Şoför için veriyi ayırıyor
+Future<void> _fetchMyJobsOrLoads() async {
     if (currentUserId == 0) return;
-    String idColumn = currentUserRole == 'CARRIER' ? 'carrier_id' : 'shipper_id';
+    final client = Supabase.instance.client;
+
     try {
-      var query = Supabase.instance.client.from('loads').select().eq(idColumn, currentUserId);
-      if (currentUserRole == 'CARRIER') {
-          query = query.eq('status', 'BOOKED'); 
-      }
-      final data = await query.order('created_at', ascending: false);
-      if (mounted) setState(() => _myJobsOrLoads = List<Map<String, dynamic>>.from(data));
+        if (currentUserRole == 'SHIPPER') {
+            // SHIPPER: Tüm kendi yayınladığı yükleri çeker (PUBLISHED, BOOKED, vb.)
+            final shipperLoads = await client.from('loads')
+                .select()
+                .eq('shipper_id', currentUserId)
+                .order('created_at', ascending: false);
+            if (mounted) setState(() => _myJobsOrLoads = List<Map<String, dynamic>>.from(shipperLoads));
+
+        } else if (currentUserRole == 'CARRIER') {
+            // CARRIER: Verileri iki ayrı listeye ayırıyoruz
+            
+            // 1. Kendi atanmış LOAD seferlerini çeker (Aktif Sefer Yükleri)
+            final bookedJobs = await client.from('loads')
+                .select()
+                .eq('carrier_id', currentUserId)
+                .eq('status', 'BOOKED')
+                .order('created_at', ascending: false);
+            
+            // 2. Kendi yayınladığı DRIVER ilanlarını çeker (Boşum İlanları)
+            final publishedPosts = await client.from('loads')
+                .select()
+                .eq('shipper_id', currentUserId) 
+                .eq('post_type', 'DRIVER')
+                .eq('status', 'PUBLISHED') // Sadece aktif yayınları çeker
+                .order('created_at', ascending: false);
+
+            if (mounted) {
+                setState(() {
+                    _activeBookedLoads = List<Map<String, dynamic>>.from(bookedJobs);
+                    _publishedDriverPosts = List<Map<String, dynamic>>.from(publishedPosts);
+                });
+            }
+        }
     } catch (e) { 
       debugPrint("Sefer/Yük Hatası: $e"); 
     }
+}
+  
+  // Mesaj Kutusu Başlıklarını Çekme Fonksiyonu
+  // _MainScreenState sınıfı içinde
+Future<void> _fetchInboxThreads() async {
+    if (currentUserId == 0) return;
+    setState(() => _loadingInbox = true);
+    
+    try {
+        // SQL Mantığı: Kullanıcının shipper_id veya carrier_id olarak yer aldığı TÜM ilanlara ait mesajları çeker
+        // Ancak bu, mesajlaşmanın SADECE bu iki role kısıtlı olduğu anlamına gelir.
+        
+        // Şirketler için: load.shipper_id = currentUserId
+        // Şoförler için: load.shipper_id = currentUserId (kendi boş ilanı için) VEYA load.carrier_id = currentUserId (atanmış yük için)
+
+        // Bu karmaşık mantık yerine, sadece kullanıcının gönderdiği veya aldığı mesajların load_id'lerini toplayan bir filtre uygulayalım:
+        
+        final response = await Supabase.instance.client
+            .from('messages')
+            .select('load_id, content, created_at, sender_role, loads!inner(id, title, post_type, shipper_id, carrier_id, users!shipper_id(name), users!carrier_id(name))')
+            .order('created_at', ascending: false);
+
+        Map<int, Map<String, dynamic>> threadMap = {};
+        
+        for (var msg in response as List) {
+            final loadId = msg['load_id'] as int;
+            final loadData = msg['loads'] as Map<String, dynamic>;
+            
+            // Kullanıcının mesajı görmesi için koşullar:
+            // 1. İlanı veren (Shipper) ise
+            // 2. Yükü alan (Carrier) ise
+            // 3. Mesajı gönderen kişi ise (Eğer ilan henüz birine atanmadıysa ve anonim mesaj attıysa)
+            
+            bool isRelevant = loadData['shipper_id'] == currentUserId || loadData['carrier_id'] == currentUserId;
+
+            if (isRelevant) {
+                if (!threadMap.containsKey(loadId)) {
+                    threadMap[loadId] = {
+                        'load_id': loadId,
+                        'title': loadData['title'],
+                        'post_type': loadData['post_type'],
+                        'last_message': msg['content'],
+                        'last_message_time': msg['created_at'],
+                        // Rolleri isimlendirme için tutabiliriz
+                        'shipper_id': loadData['shipper_id'],
+                        'carrier_id': loadData['carrier_id']
+                    };
+                }
+            }
+        }
+
+        if (mounted) {
+            setState(() {
+                _inboxThreads = threadMap.values.toList();
+                _inboxThreads.sort((a, b) => (b['last_message_time'] as String).compareTo(a['last_message_time'] as String));
+            });
+        }
+    } catch (e) {
+        debugPrint("Mesaj Kutusu Çekme Hatası: $e");
+    } finally {
+        if (mounted) setState(() => _loadingInbox = false);
+    }
+}
+
+  // YENİ: Şoför Boşum İlanlarını Otomatik İptal Etme
+  Future<void> _deleteCarrierDriverPosts() async {
+      if (currentUserRole != 'CARRIER') return;
+
+      // Şoförün tüm yayınlanmış DRIVER ilanlarını iptal et (Soft Delete: CANCELED olarak işaretle)
+      await Supabase.instance.client
+          .from('loads')
+          .update({'status': 'CANCELED'}) 
+          .eq('shipper_id', currentUserId)
+          .eq('post_type', 'DRIVER')
+          .eq('status', 'PUBLISHED'); // Sadece yayınlanmış olanları iptal et
+      
+      // UI'ı güncellemek için listeleri tekrar çek
+      _fetchMyJobsOrLoads();
+      _fetchAll();
   }
+
 
   Future<void> _locateUser() async {
     try {
@@ -322,45 +523,29 @@ class _MainScreenState extends State<MainScreen> {
         
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIdx,
-        onDestinationSelected: (i) => setState(() => _idx = i),
+        onDestinationSelected: (i) => setState(() {
+          _idx = i;
+          if (i == 2) _fetchInboxThreads();
+        }),
         backgroundColor: Colors.white,
         destinations: destinations,
       ),
     );
   }
 
-// _MainScreenState sınıfı içinde
-Widget _map() {
+  Widget _map() {
     bool isShipper = currentUserRole == 'SHIPPER';
     
-    // YENİ DÜZELTME: Şirketler ve Şoförler için Harita üzerinde gösterilecek ana ilan listesi.
-    // _loads listesi zaten _fetchAll() içinde role göre filtrelenmiştir (LOAD veya DRIVER).
-    // Ancak Şirketler, Yüklerim listesindeki atanmış işleri de görmek isteyeceği için,
-    // Harita kaynağını her iki listeyi kapsayacak şekilde (şu anki kısıtlı mantıkta) _loads olarak bırakıp,
-    // atanmış yükleri _myJobsOrLoads'dan çekmek daha doğru olur.
+    List<Map<String, dynamic>> mapMarkers = List.from(_loads); 
     
-    // Gözden geçirilmiş Mantık:
-    // 1. Şirket (SHIPPER): Kendi ilanları (_myJobsOrLoads) + Pazardan gelen Boş Araçlar (_loads)
-    // 2. Şoför (CARRIER): Pazardan gelen Yükler (_loads) + Kendi Seferleri (_myJobsOrLoads)
-    
-    // En basit çözüm: Sadece tek bir liste gösteriyorsak, o anki pazar (_loads) gösterilsin.
-    // Harita üzerinde hem Pazar hem de Kendi İşlerini görme isteği için iki listeyi birleştirmemiz gerekir.
-    
-    List<Map<String, dynamic>> mapMarkers = List.from(_loads); // Pazar verisi (LOADS/DRIVERS)
-    
-    // Eğer Şirket ise, kendi atanmış yüklerini de ekle (eğer zaten pazar listesinde yoksa)
     if (isShipper) {
-      // Şirketler haritada hem Boş Araç Pazarını hem de kendi Atanmış Yüklerini görmeli.
-      // Şu anki kodda _myJobsOrLoads sadece shipper_id'si currentUserId olanları içerir.
       mapMarkers.addAll(_myJobsOrLoads.where((load) => load['post_type'] == 'LOAD').toList());
     }
     
-    // Eğer Şoför ise, atanmış seferlerini de ekle
     if (!isShipper) {
-       mapMarkers.addAll(_myJobsOrLoads.where((load) => load['post_type'] == 'LOAD').toList());
+       mapMarkers.addAll(_activeBookedLoads.where((load) => load['post_type'] == 'LOAD').toList()); 
     }
 
-    // Listeyi benzersiz hale getiriyoruz (bir ilan hem pazarda hem de atanmış olamaz, ama DRIVER ilanı pazarda görünebilir)
     Map<int, Map<String, dynamic>> uniqueLoads = {};
     for (var load in mapMarkers) {
       if (load['id'] != null) {
@@ -369,7 +554,6 @@ Widget _map() {
     }
     List<Map<String, dynamic>> markersList = uniqueLoads.values.toList();
     
-    // Harita Görüntüsü
     return Stack(
       children: [
         FlutterMap(
@@ -388,7 +572,6 @@ Widget _map() {
 
             MarkerLayer(markers: markersList.map((load) {
               bool isSelected = _selectedLoad == load;
-              // Marker rengi rol ve post tipine göre ayarlanır
               bool isDriverPost = load['post_type'] == 'DRIVER';
               Color markerColor = isDriverPost ? Colors.blue[700]! : Colors.orange[800]!;
 
@@ -449,45 +632,113 @@ Widget _map() {
     );
   }
 
-  Widget _inbox() => Scaffold(appBar: AppBar(title: const Text("Mesajlar (Geliştiriliyor)")), body: const Center(child: Text("Mesaj kutusu yakında. İlanlar üzerinden mesajlaşma mantığı kurulacak.")));
+  // Mesaj Kutusu Listesi Widget'ı
+  Widget _inbox() {
+      if (_loadingInbox) {
+          return Scaffold(appBar: AppBar(title: const Text("Mesajlar")), body: const Center(child: CircularProgressIndicator()));
+      }
+      
+      if (_inboxThreads.isEmpty) {
+          return Scaffold(appBar: AppBar(title: const Text("Mesajlar")), body: const Center(child: Text("Aktif mesajlaşmanız bulunmuyor.")));
+      }
 
+      return Scaffold(
+          appBar: AppBar(title: const Text("Mesajlar")),
+          body: ListView.builder(
+              padding: const EdgeInsets.all(10),
+              itemCount: _inboxThreads.length,
+              itemBuilder: (context, index) {
+                  final thread = _inboxThreads[index];
+                  
+                  bool isDriverPost = thread['post_type'] == 'DRIVER';
+                  
+                  String timeAgo = DateFormat('dd MMM HH:mm', 'tr').format(DateTime.parse(thread['last_message_time']).toLocal());
+                  
+                  return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 5),
+                      child: ListTile(
+                          leading: Icon(isDriverPost ? Icons.local_shipping : Icons.inventory_2, color: isDriverPost ? Colors.blue : Colors.orange),
+                          title: Text(thread['title']),
+                          subtitle: Text(thread['last_message'], maxLines: 1, overflow: TextOverflow.ellipsis),
+                          trailing: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                  Text(timeAgo, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                              ],
+                          ),
+                          onTap: () {
+                              showModalBottomSheet(
+                                context: context, 
+                                isScrollControlled: true, 
+                                builder: (ctx) => _ChatScreen(
+                                  loadTitle: thread['title'], 
+                                  price: 0, 
+                                  loadId: thread['load_id']
+                                )
+                              ).whenComplete(() {
+                                _fetchInboxThreads(); 
+                              });
+                          },
+                      ),
+                  );
+              },
+          ),
+      );
+  }
+
+  // GÜNCELLENDİ: Şoför için UI ayrımı yapıldı
   Widget _myJobsOrLoadsScreen() {
     bool isShipper = currentUserRole == 'SHIPPER';
-    if (_myJobsOrLoads.isEmpty) {
-      return Center(child: Text(isShipper ? "Hiç yük ilanı vermediniz." : "Aktif atanmış seferiniz yok."));
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    
+    if (isShipper) {
+        // SHIPPER UI (Şirket)
+        if (_myJobsOrLoads.isEmpty) return const Center(child: Text("Henüz yayınlanmış veya atanmış yükünüz yok."));
+        return Scaffold(
+          appBar: AppBar(title: const Text("Yayınladığım Yükler")),
+          body: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _myJobsOrLoads.length,
+              itemBuilder: (context, index) {
+                final load = _myJobsOrLoads[index];
+                return _loadCard(load, isShipper); 
+              },
+          ),
+        );
+    } else {
+        // CARRIER UI (Şoför - İkiye ayrılmış görünüm)
+        bool hasActiveJobs = _activeBookedLoads.isNotEmpty;
+        bool hasPublishedPosts = _publishedDriverPosts.isNotEmpty;
+
+        if (!hasActiveJobs && !hasPublishedPosts) {
+          return const Center(child: Text("Aktif seferiniz veya yayınlanmış ilanınız bulunmamaktadır."));
+        }
+
+        return Scaffold(
+          appBar: AppBar(title: const Text("Seferlerim / İlanlarım")),
+          body: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                  // --- BÖLÜM 1: AKTİF SEFER YÜKLERİ (BOOKED LOADS) ---
+                  Text("Aktif Sefer Yükleri (${_activeBookedLoads.length})", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue[800])),
+                  const Divider(),
+                  if (_activeBookedLoads.isEmpty) 
+                      const Padding(padding: EdgeInsets.only(bottom: 20), child: Text("Henüz size atanmış aktif bir sefer yok.")),
+                  ..._activeBookedLoads.map((load) => _loadCard(load, isShipper)).toList(),
+
+                  const SizedBox(height: 30),
+
+                  // --- BÖLÜM 2: YAYINLANMIŞ BOŞUM İLANLARI (DRIVER POSTS) ---
+                  Text("Yayınlanmış Boşum İlanları (${_publishedDriverPosts.length}/5)", style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green[800])),
+                  const Divider(),
+                  if (_publishedDriverPosts.isEmpty) 
+                      const Padding(padding: EdgeInsets.only(bottom: 20), child: Text("Yayınlanmış boşum ilanınız bulunmamaktadır.")),
+                  ..._publishedDriverPosts.map((load) => _loadCard(load, isShipper)).toList(),
+              ],
+          ),
+        );
     }
-    String title = isShipper ? "Yayınladığım Yükler" : "Aktif Seferlerim";
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(15),
-        itemCount: _myJobsOrLoads.length,
-        itemBuilder: (ctx, i) {
-          final jobOrLoad = _myJobsOrLoads[i];
-          final String status = jobOrLoad['status'] as String? ?? 'PUBLISHED';
-          Color cardColor;
-          if (isShipper) {
-              cardColor = (status == 'BOOKED') ? Colors.blue.shade50 : Colors.grey.shade50;
-          } else {
-              cardColor = Colors.green.shade50;
-          }
-          IconData icon = isShipper ? Icons.assignment : Icons.local_shipping;
-          String statusText = _getStatusText(status, isShipper);
-          return Card(
-            color: cardColor,
-            child: ListTile(
-              leading: Icon(icon, color: isShipper ? Colors.blue : Colors.green),
-              title: Text(jobOrLoad['title']),
-              subtitle: Text(statusText),
-              trailing: isShipper 
-                ? const Icon(Icons.chevron_right)
-                : ElevatedButton(onPressed: (){}, child: const Text("TESLİM ET")),
-              onTap: () => _showDetails(jobOrLoad),
-            ),
-          );
-        },
-      ),
-    );
   }
 
   Widget _profile() => Center(child: ElevatedButton(onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_)=>const LoginScreen())), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), child: const Text("Çıkış Yap")));
@@ -496,7 +747,7 @@ Widget _map() {
     return await Navigator.push(context, MaterialPageRoute(builder: (context) => const LocationPickerScreen()));
   }
 
-  // --- İLAN EKLEME (TextField/TextFormField hatası düzeltildi) ---
+  // --- İLAN EKLEME (Limit Kontrolü Eklendi) ---
   void _addDialog() {
     final _formKey = GlobalKey<FormState>();
     final titleC = TextEditingController(); final priceC = TextEditingController(); 
@@ -569,8 +820,7 @@ Widget _map() {
                   ]),
                   const SizedBox(height: 10),
                   Row(children: [
-                    // HATA DÜZELTİLDİ: TextField -> TextFormField yapıldı ve validator çalışır hale geldi.
-                    Expanded(child: TextFormField(controller: loadTypeC, decoration: const InputDecoration(labelText: "Yük Tanımı (Örn: Palet, Ev Eşyası) *", border: OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null)),
+                    Expanded(child: TextFormField(controller: loadTypeC, decoration: const InputDecoration(labelText: "Yük Tanımı (Örn: Palet, Ev Eşyası) *", border: const OutlineInputBorder()), validator: (v) => v!.isEmpty ? "Zorunlu" : null)),
                     const SizedBox(width: 10),
                     Expanded(child: TextField(controller: vC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Hacim m³ (Opsiyonel)", border: const OutlineInputBorder()))),
                   ]),
@@ -604,8 +854,19 @@ Widget _map() {
                 if(!isDriver) CheckboxListTile(title: const Text("İstiflenebilir?"), value: isStack, onChanged: (v)=>setState(()=>isStack=v!), contentPadding: EdgeInsets.zero),
 
                 const SizedBox(height: 20),
-                SizedBox(width: double.infinity, height: 55, child: ElevatedButton(onPressed: (){ 
+                SizedBox(width: double.infinity, height: 55, child: ElevatedButton(onPressed: () async { 
                   if(_formKey.currentState!.validate() && pickupLoc != null && deliveryLoc != null) {
+                    
+                    // İLAN SINIRI KONTROLÜ (CARRIER)
+                    if (isDriver) {
+                        if (_publishedDriverPosts.length >= 5) {
+                            if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Maksimum 5 adet boşum ilanı yayınlayabilirsiniz."), backgroundColor: Colors.red));
+                                return; 
+                            }
+                        }
+                    }
+                    
                     if (vType == null || bType == null) {
                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen Araç ve Kasa seçiniz!"), backgroundColor: Colors.red));
                        return;
@@ -617,7 +878,7 @@ Widget _map() {
                     
                     String finalBType = bType ?? filteredBodyTypes.firstWhere((element) => true, orElse: () => 'STANDART');
 
-                    _saveLoad(titleC.text, double.tryParse(priceC.text)??0, int.tryParse(wC.text)??0, double.tryParse(vC.text)??0, pickupLoc!, deliveryLoc!, vType ?? 'TIR', finalBType, loadTypeC.text, isStack, isDriver ? 'DRIVER' : 'LOAD', qty: int.tryParse(qtyC.text), dw: int.tryParse(dimWC.text), dl: int.tryParse(dimLC.text), dh: int.tryParse(dimHC.text));
+                    await _saveLoad(titleC.text, double.tryParse(priceC.text)??0, int.tryParse(wC.text)??0, double.tryParse(vC.text)??0, pickupLoc!, deliveryLoc!, vType ?? 'TIR', finalBType, loadTypeC.text, isStack, isDriver ? 'DRIVER' : 'LOAD', qty: int.tryParse(qtyC.text), dw: int.tryParse(dimWC.text), dl: int.tryParse(dimLC.text), dh: int.tryParse(dimHC.text));
                   } else {
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen zorunlu alanları ve rotayı doldurun!"), backgroundColor: Colors.red));
                   }
@@ -630,6 +891,7 @@ Widget _map() {
     ));
   }
 
+  // HATA DÜZELTİLDİ: _locationSelector doğru olarak yeniden yazıldı
   Widget _locationSelector(String label, Map<String, dynamic>? loc, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -657,6 +919,7 @@ Widget _map() {
         await Supabase.instance.client.from('loads').insert(loadData);
         _fetchAll(); 
         _fetchMyJobsOrLoads(); 
+        _fetchInboxThreads(); 
         if (mounted) {
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("İlan Başarıyla Yayınlandı!"), backgroundColor: Colors.green));
@@ -667,86 +930,21 @@ Widget _map() {
     }
   }
 
-  void _showDetails(Map<String, dynamic> load) {
-    if (mounted) {
-      showModalBottomSheet(
-        context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.45, minChildSize: 0.2, maxChildSize: 0.9,
-        builder: (_, controller) => Container(
-          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-          padding: const EdgeInsets.all(20),
-          child: ListView(controller: controller, children: [
-            Center(child: Container(width: 40, height: 4, color: Colors.grey[300], margin: const EdgeInsets.only(bottom: 20))),
-            Text(load['title'] ?? '', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Wrap(spacing: 8, children: [
-              Chip(label: Text(_translate(load['required_body'] ?? 'Bilinmiyor')), backgroundColor: Colors.blue[50]), 
-              if(load['is_stackable'] == true) const Chip(label: Text("İstiflenebilir"), backgroundColor: Colors.orangeAccent), 
-              Chip(label: Text(load['load_type'] ?? 'Yük Tanımı Yok'), backgroundColor: Colors.purple[50]) 
-            ]),
-            const Divider(height: 30),
-            
-            if (load['quantity'] != null && load['dim_width'] != null && load['dim_width'] > 0) ...[
-              const Text("Yük Ebatları & Adet", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-              const SizedBox(height: 5),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [_miniBox("${load['quantity']} Adet", Icons.grid_view), _miniBox("${load['dim_width']}x${load['dim_length']}x${load['dim_height']} cm", Icons.aspect_ratio)]),
-              const SizedBox(height: 20),
-            ],
-            
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _infoRow(Icons.circle, Colors.green, "Nereden", load['pickup_address']), 
-                _verticalLine(), 
-                _infoRow(Icons.circle, Colors.red, "Nereye", load['delivery_address'] ?? 'Bilinmiyor'),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            Row(children: [
-              Expanded(child: _boxInfo(load['post_type']=='DRIVER'?"Kapasite":"Ağırlık", "${load['weight_kg']} KG", Icons.scale)), 
-              Expanded(child: _boxInfo("Araç", _translate(load['required_vehicle']), Icons.local_shipping)) 
-            ]),
-            
-            const SizedBox(height: 30),
-            Text(
-              load['post_type'] == 'DRIVER' 
-                ? "KM/ ${NumberFormat.compact().format(load['price'])}₺"
-                : NumberFormat.currency(locale: 'tr', symbol: '₺').format(load['price']), 
-              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: Colors.green)
-            ),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: OutlinedButton.icon(onPressed: () => _openGoogleMaps(load['pickup_lat'], load['pickup_lng'], load['delivery_lat'], load['delivery_lng']), icon: const Icon(Icons.map), label: const Text("YOL TARİFİ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
-              const SizedBox(width: 10),
-              Expanded(child: OutlinedButton.icon(onPressed: () => _openChatDialog(load), icon: const Icon(Icons.chat_bubble_outline), label: const Text("MESAJ"), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 15)))),
-            ]),
-            const SizedBox(height: 10),
-            if(currentUserRole == 'SHIPPER' && load['shipper_id'] == currentUserId) 
-              SizedBox(width: double.infinity, child: ElevatedButton.icon(
-                onPressed: () => _delete(load['id']), 
-                icon: const Icon(Icons.delete), 
-                label: const Text("İLANI SİL"), 
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15))
-              ))
-            else if (currentUserRole == 'CARRIER' && load['post_type'] != 'DRIVER')
-               SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => _acceptLoad(load), style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15)), child: const Text("YÜKÜ AL (REZERVE ET)")))
-          ]),
-        )
-      )).whenComplete(() => _clearRoute()); 
-    }
-  }
-
+  // TAKSİCİ MANTIĞI ÇAĞRISI BURADA
   Future<void> _acceptLoad(Map<String, dynamic> load) async {
     try {
       await Supabase.instance.client.from('loads')
           .update({'status': 'BOOKED', 'carrier_id': currentUserId})
           .eq('id', load['id']);
+          
+      // TAKSİCİ MANTIĞI: Yeni iş alındığında boşum ilanlarını sil
+      await _deleteCarrierDriverPosts(); 
+
       _fetchAll(); 
       _fetchMyJobsOrLoads();
       if (mounted) {
         Navigator.pop(context); 
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Yük Rezerve Edildi!"), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Yük Rezerve Edildi! Boşum ilanları iptal edildi."), backgroundColor: Colors.green));
       }
     } catch (e) {
       debugPrint("Yük kabul etme hatası: $e");
@@ -755,34 +953,64 @@ Widget _map() {
       }
     }
   }
-
-  Future<void> _delete(int id) async { 
+  
+  // Silme Butonunun Çağrısı
+  // _MainScreenState sınıfı içinde
+// _MainScreenState sınıfı içinde
+Future<void> _delete(int id) async { 
+    bool success = false;
+    
     try {
+      // 1. Veritabanından silme işlemini gerçekleştir
       await Supabase.instance.client.from('loads').delete().eq('id', id); 
-      if (mounted) setState(() => _selectedLoad = null); 
-      _fetchAll(); 
-      _fetchMyJobsOrLoads();
-      if (mounted) {
-        Navigator.pop(context); 
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("🗑️ İlan Başarıyla Silindi!"), backgroundColor: Colors.orange));
-      }
+      
+      // 2. Silme başarılı oldu
+      success = true;
+
     } catch (e) {
       debugPrint("İlan silme hatası: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Silme Hatası: ${e.toString()}"), backgroundColor: Colors.red));
       }
-    }
-  }
+    } finally {
+        if (mounted) {
+            // 3. UI/Veri Yenileme (Hata olsa da olmasa da yenileme yapılması gerekir)
+            await _fetchAll(); 
+            await _fetchMyJobsOrLoads();
+            await _fetchInboxThreads(); 
 
-  void _openChatDialog(Map<String, dynamic> load) { 
+            // 4. Detay penceresini kapat
+            // Navigator'ı en sona alarak listenin güncellendiğinden emin oluyoruz.
+            if (Navigator.of(context).canPop()) {
+                 Navigator.pop(context); 
+            }
+            
+            // 5. Başarı bildirimi
+            if (success) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("🗑️ İlan Başarıyla Silindi!"), backgroundColor: Colors.orange));
+            }
+        }
+    }
+}
+
+  // _MainScreenState sınıfı içinde
+void _openChatDialog(Map<String, dynamic> load) { 
     if (mounted) {
       showModalBottomSheet(
         context: context, 
         isScrollControlled: true, 
         builder: (ctx) => _ChatScreen(loadTitle: load['title'] ?? 'İlan', price: load['price'], loadId: load['id'])
-      ); 
+      ).whenComplete(() {
+        // Sohbet penceresi kapandığında listeyi yenile
+        _fetchInboxThreads(); 
+      });
+      
+      // KRİTİK DÜZELTME: Sohbet açıldığında listeyi hemen yenile
+      // Bu, ilk mesaj atılmadan önce bile Mesajlar sekmesinde başlığın görünmesini sağlar.
+      // (Asenkron olarak çalıştırıyoruz)
+      _fetchInboxThreads(); 
     }
-  }
+}
 
   void _openGoogleMaps(double? pLat, double? pLng, double? dLat, double? dLng) async {
     if(pLat == null || dLat == null || pLng == null || dLng == null) {
@@ -803,7 +1031,40 @@ Widget _map() {
     }
   }
 
-  // --- HELPER WIDGET'LAR DÜZELTİLDİ ---
+  // --- HELPER WIDGET'LAR (Hata veren tüm helper'lar doğru tanımlandı) ---
+  
+  // HATA DÜZELTİLDİ: _loadCard fonksiyonu eklendi
+  Widget _loadCard(Map<String, dynamic> jobOrLoad, bool isShipper) {
+    final String status = jobOrLoad['status'] as String? ?? 'PUBLISHED';
+    final bool isDriverPost = jobOrLoad['post_type'] == 'DRIVER';
+
+    Color cardColor = isDriverPost ? Colors.green.shade50 : (status == 'BOOKED' ? Colors.blue.shade50 : Colors.grey.shade50);
+    IconData icon = isDriverPost ? Icons.campaign : (isShipper ? Icons.assignment : Icons.local_shipping);
+    String statusText = _getStatusText(status, isShipper);
+
+    return Card(
+        color: cardColor,
+        margin: const EdgeInsets.only(bottom: 10),
+        child: ListTile(
+          leading: Icon(icon, color: isDriverPost ? Colors.green[700] : (isShipper ? Colors.blue : Colors.green)),
+          title: Text(jobOrLoad['title']),
+          subtitle: Text(statusText),
+          trailing: isDriverPost && !isShipper 
+             ? ElevatedButton(
+                onPressed: () => _delete(jobOrLoad['id']), 
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, minimumSize: const Size(80, 35)), 
+                child: const Text("SİL")
+               )
+             : isShipper && status != 'BOOKED'
+                ? const Icon(Icons.chevron_right)
+                : isShipper && status == 'BOOKED'
+                    ? const Icon(Icons.check_circle_outline, color: Colors.green) 
+                    : ElevatedButton(onPressed: (){}, child: const Text("TESLİM ET")),
+          onTap: () => _showDetails(jobOrLoad),
+        ),
+    );
+  }
+
   Widget _infoRow(IconData i, Color c, String l, String v) => Row(children: [Icon(i, size: 14, color: c), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(l, style: const TextStyle(color: Colors.grey, fontSize: 10)), Text(v, style: const TextStyle(fontWeight: FontWeight.bold))]))]);
   Widget _verticalLine() => Container(margin: const EdgeInsets.only(left: 6), height: 20, width: 2, color: Colors.grey[200]);
   Widget _boxInfo(String l, String v, IconData i) => Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(10)), child: Column(children: [Icon(i, size: 20, color: Colors.blueGrey), const SizedBox(height: 5), Text(v, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), textAlign: TextAlign.center, overflow: TextOverflow.ellipsis), Text(l, style: const TextStyle(fontSize: 10, color: Colors.grey))]));
@@ -811,7 +1072,7 @@ Widget _map() {
 
 }
 
-// Konum Seçici Ekranı
+// Konum Seçici Ekranı (Aynı Kaldı)
 class LocationPickerScreen extends StatefulWidget { const LocationPickerScreen({super.key}); @override State<LocationPickerScreen> createState() => _LocationPickerScreenState(); }
 class _LocationPickerScreenState extends State<LocationPickerScreen> {
   final MapController _pickerMapController = MapController();
@@ -828,5 +1089,131 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   @override Widget build(BuildContext context) { return Scaffold(body: Stack(children: [FlutterMap(mapController: _pickerMapController, options: MapOptions(initialCenter: _center, initialZoom: 12.0, onPositionChanged: _onPositionChanged, onMapEvent: (evt) { if (evt is MapEventMoveEnd) _getAddress(); }), children: [TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')]), const Center(child: Icon(Icons.location_on, size: 50, color: Colors.red)), SafeArea(child: Column(children: [Container(margin: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 10)]), child: Column(children: [TextField(controller: _searchC, decoration: InputDecoration(hintText: "İl, İlçe veya Yer Ara...", prefixIcon: const Icon(Icons.search), suffixIcon: IconButton(icon: const Icon(Icons.close), onPressed: (){ _searchC.clear(); if(mounted) setState(()=>_searchResults=[]); }), border: InputBorder.none, contentPadding: const EdgeInsets.all(15)), onChanged: _searchPlace), if (_searchResults.isNotEmpty) Container(height: 200, color: Colors.white, child: ListView.builder(itemCount: _searchResults.length, itemBuilder: (ctx, i) { final place = _searchResults[i]; return ListTile(title: Text(place['display_name'], maxLines: 1, overflow: TextOverflow.ellipsis), leading: const Icon(Icons.place, color: Colors.grey), onTap: () { final lat = double.parse(place['lat']); final lon = double.parse(place['lon']); _pickerMapController.move(LatLng(lat, lon), 15); if(mounted) setState(() { _center = LatLng(lat, lon); _searchResults = []; _searchC.clear(); }); _getAddress(); FocusScope.of(context).unfocus(); }); }))]))])), Positioned(bottom: 0, left: 0, right: 0, child: Container(padding: const EdgeInsets.all(20), decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text("Seçilen Konum:", style: TextStyle(color: Colors.grey)), Text(_address, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), const SizedBox(height: 15), SizedBox(width: double.infinity, height: 50, child: ElevatedButton(onPressed: () { if(mounted) Navigator.pop(context, {'lat': _center.latitude, 'lng': _center.longitude, 'address': _address}); }, style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), child: const Text("BU KONUMU ONAYLA")))])))],),); }
 }
 
+// GÜNCELLENMİŞ CHAT EKRANI (Realtime Entegre)
 class _ChatScreen extends StatefulWidget { final String loadTitle; final dynamic price; final int loadId; const _ChatScreen({required this.loadTitle, required this.price, required this.loadId}); @override State<_ChatScreen> createState() => _ChatScreenState(); }
-class _ChatScreenState extends State<_ChatScreen> { final TextEditingController _cnt = TextEditingController(); List<Map<String, dynamic>> _msgs = []; @override void initState() { super.initState(); _load(); } Future<void> _load() async { final d = await Supabase.instance.client.from('messages').select().eq('load_id', widget.loadId).order('created_at', ascending: true); if(mounted) setState(() => _msgs = List<Map<String, dynamic>>.from(d)); } Future<void> _send() async { if(_cnt.text.isEmpty) return; await Supabase.instance.client.from('messages').insert({'load_id': widget.loadId, 'content': _cnt.text, 'sender_role': currentUserRole}); _cnt.clear(); _load(); } @override Widget build(BuildContext context) { return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom), child: Container(height: 500, padding: const EdgeInsets.all(20), child: Column(children: [Text("Pazarlık: ${widget.loadTitle}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), const Divider(), Expanded(child: ListView.builder(itemCount: _msgs.length, itemBuilder: (c, i) { final m = _msgs[i]; bool me = m['sender_role'] == currentUserRole; return Align(alignment: me ? Alignment.centerRight : Alignment.centerLeft, child: Container(margin: const EdgeInsets.symmetric(vertical: 5), padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: me ? Colors.blue[100] : Colors.grey[200], borderRadius: BorderRadius.circular(10)), child: Text(m['content']))); })), Row(children: [Expanded(child: TextField(controller: _cnt, decoration: const InputDecoration(hintText: "Mesaj..."))), IconButton(onPressed: _send, icon: const Icon(Icons.send, color: Colors.blue))])]))); } }
+class _ChatScreenState extends State<_ChatScreen> { 
+  final TextEditingController _cnt = TextEditingController(); 
+  List<Map<String, dynamic>> _msgs = []; 
+  late final StreamSubscription<List<Map<String, dynamic>>> _messagesSubscription;
+
+  @override
+  void initState() { 
+    super.initState(); 
+    _loadInitialMessages(); 
+    _setupRealtimeListener(); 
+  } 
+
+  @override
+  void dispose() {
+    _messagesSubscription.cancel(); 
+    super.dispose();
+  }
+
+  Future<void> _loadInitialMessages() async { 
+    try {
+        final d = await Supabase.instance.client.from('messages')
+            .select()
+            .eq('load_id', widget.loadId)
+            .order('created_at', ascending: true);
+        
+        if(mounted) {
+            setState(() => _msgs = List<Map<String, dynamic>>.from(d));
+        }
+    } catch (e) {
+        debugPrint("İlk mesajlar yüklenirken hata: $e");
+    }
+  }
+
+  void _setupRealtimeListener() {
+    final client = Supabase.instance.client;
+    
+    _messagesSubscription = client
+        .from('messages')
+        .stream(primaryKey: ['id'])
+        .eq('load_id', widget.loadId) 
+        .order('created_at', ascending: true)
+        .listen((data) {
+            if(mounted) {
+                setState(() {
+                    _msgs = List<Map<String, dynamic>>.from(data);
+                });
+            }
+        });
+  }
+
+  Future<void> _send() async { 
+    if(_cnt.text.isEmpty) return; 
+
+    try {
+        await Supabase.instance.client.from('messages').insert({
+            'load_id': widget.loadId, 
+            'content': _cnt.text, 
+            'sender_role': currentUserRole
+        });
+        
+        _cnt.clear(); 
+        
+    } catch (e) {
+        debugPrint("Mesaj gönderme hatası: $e");
+        if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Mesaj gönderilemedi: ${e.toString()}"), backgroundColor: Colors.red));
+        }
+    }
+  } 
+
+  @override 
+  Widget build(BuildContext context) { 
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom), 
+      child: Container(
+        height: 500, 
+        padding: const EdgeInsets.all(20), 
+        child: Column(
+          children: [
+            Text("Pazarlık: ${widget.loadTitle}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), 
+            const Divider(), 
+            Expanded(
+              child: ListView.builder(
+                reverse: true, 
+                itemCount: _msgs.length, 
+                itemBuilder: (c, i) { 
+                    final m = _msgs[_msgs.length - 1 - i]; 
+                    bool me = m['sender_role'] == currentUserRole; 
+                    
+                    return Align(
+                        alignment: me ? Alignment.centerRight : Alignment.centerLeft, 
+                        child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 5), 
+                            padding: const EdgeInsets.all(10), 
+                            decoration: BoxDecoration(
+                                color: me ? Colors.blue[100] : Colors.grey[200], 
+                                borderRadius: BorderRadius.circular(10)
+                            ), 
+                            child: Column(
+                                crossAxisAlignment: me ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                children: [
+                                    Text(m['content']),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                        DateFormat('HH:mm').format(DateTime.parse(m['created_at']).toLocal()), 
+                                        style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                                    ),
+                                ],
+                            )
+                        )
+                    ); 
+                }
+              )
+            ), 
+            Row(
+              children: [
+                Expanded(child: TextField(controller: _cnt, decoration: const InputDecoration(hintText: "Mesaj..."))), 
+                IconButton(onPressed: _send, icon: const Icon(Icons.send, color: Colors.blue))
+              ]
+            )
+          ]
+        )
+      )
+    ); 
+  } 
+}
