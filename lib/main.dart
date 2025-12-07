@@ -96,7 +96,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passC = TextEditingController(text: "123");
   bool _isLoading = false;
 
-  void _attemptLogin() {
+  // _LoginScreenState sınıfının içindeki _attemptLogin() fonksiyonu
+
+void _attemptLogin() {
     setState(() => _isLoading = true);
     String user = _userC.text.trim().toLowerCase();
     String pass = _passC.text.trim();
@@ -105,12 +107,17 @@ class _LoginScreenState extends State<LoginScreen> {
       if (pass == "123") { 
         if (user == "firma") _loginSuccess('SHIPPER', 'Global Lojistik A.Ş.', 1);
         else if (user == "sofor") _loginSuccess('CARRIER', 'Ali Kaptan', 2);
+        
+        // YENİ KULLANICILAR EKLENDİ
+        else if (user == "mavikapi") _loginSuccess('SHIPPER', 'Mavi Kapı Taşımacılık A.Ş.', 3);
+        else if (user == "ayse") _loginSuccess('CARRIER', 'Ayşe Şoför', 4);
+        
         else _showError("Kullanıcı bulunamadı.");
       } else {
         _showError("Hatalı şifre! (Demo: 123)");
       }
     });
-  }
+}
 
   void _loginSuccess(String role, String name, int id) {
     currentUserRole = role;
@@ -322,9 +329,47 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _map() {
+// _MainScreenState sınıfı içinde
+Widget _map() {
     bool isShipper = currentUserRole == 'SHIPPER';
-    List<Map<String, dynamic>> markersList = isShipper ? _myJobsOrLoads : _loads;
+    
+    // YENİ DÜZELTME: Şirketler ve Şoförler için Harita üzerinde gösterilecek ana ilan listesi.
+    // _loads listesi zaten _fetchAll() içinde role göre filtrelenmiştir (LOAD veya DRIVER).
+    // Ancak Şirketler, Yüklerim listesindeki atanmış işleri de görmek isteyeceği için,
+    // Harita kaynağını her iki listeyi kapsayacak şekilde (şu anki kısıtlı mantıkta) _loads olarak bırakıp,
+    // atanmış yükleri _myJobsOrLoads'dan çekmek daha doğru olur.
+    
+    // Gözden geçirilmiş Mantık:
+    // 1. Şirket (SHIPPER): Kendi ilanları (_myJobsOrLoads) + Pazardan gelen Boş Araçlar (_loads)
+    // 2. Şoför (CARRIER): Pazardan gelen Yükler (_loads) + Kendi Seferleri (_myJobsOrLoads)
+    
+    // En basit çözüm: Sadece tek bir liste gösteriyorsak, o anki pazar (_loads) gösterilsin.
+    // Harita üzerinde hem Pazar hem de Kendi İşlerini görme isteği için iki listeyi birleştirmemiz gerekir.
+    
+    List<Map<String, dynamic>> mapMarkers = List.from(_loads); // Pazar verisi (LOADS/DRIVERS)
+    
+    // Eğer Şirket ise, kendi atanmış yüklerini de ekle (eğer zaten pazar listesinde yoksa)
+    if (isShipper) {
+      // Şirketler haritada hem Boş Araç Pazarını hem de kendi Atanmış Yüklerini görmeli.
+      // Şu anki kodda _myJobsOrLoads sadece shipper_id'si currentUserId olanları içerir.
+      mapMarkers.addAll(_myJobsOrLoads.where((load) => load['post_type'] == 'LOAD').toList());
+    }
+    
+    // Eğer Şoför ise, atanmış seferlerini de ekle
+    if (!isShipper) {
+       mapMarkers.addAll(_myJobsOrLoads.where((load) => load['post_type'] == 'LOAD').toList());
+    }
+
+    // Listeyi benzersiz hale getiriyoruz (bir ilan hem pazarda hem de atanmış olamaz, ama DRIVER ilanı pazarda görünebilir)
+    Map<int, Map<String, dynamic>> uniqueLoads = {};
+    for (var load in mapMarkers) {
+      if (load['id'] != null) {
+        uniqueLoads[load['id']] = load;
+      }
+    }
+    List<Map<String, dynamic>> markersList = uniqueLoads.values.toList();
+    
+    // Harita Görüntüsü
     return Stack(
       children: [
         FlutterMap(
@@ -343,7 +388,10 @@ class _MainScreenState extends State<MainScreen> {
 
             MarkerLayer(markers: markersList.map((load) {
               bool isSelected = _selectedLoad == load;
-              Color markerColor = load['post_type'] == 'LOAD' ? Colors.orange[800]! : Colors.green[700]!;
+              // Marker rengi rol ve post tipine göre ayarlanır
+              bool isDriverPost = load['post_type'] == 'DRIVER';
+              Color markerColor = isDriverPost ? Colors.blue[700]! : Colors.orange[800]!;
+
               return Marker(
                 point: LatLng(load['pickup_lat'] ?? 39.0, load['pickup_lng'] ?? 35.0),
                 width: isSelected ? 90 : 70, height: isSelected ? 90 : 70,
@@ -355,13 +403,13 @@ class _MainScreenState extends State<MainScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), boxShadow: [const BoxShadow(color: Colors.black26, blurRadius: 5)]),
-                        child: Text(load['post_type'] == 'DRIVER' ? "BOŞ" : "${NumberFormat.compact().format(load['price'])}₺", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: markerColor)),
+                        child: Text(isDriverPost ? "BOŞ" : "${NumberFormat.compact().format(load['price'])}₺", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: markerColor)),
                       ),
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(color: markerColor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2), boxShadow: [const BoxShadow(color: Colors.black38, blurRadius: 5)]),
-                        child: Icon(load['post_type'] == 'DRIVER' ? Icons.local_shipping : Icons.inventory_2, color: Colors.white, size: isSelected ? 30 : 20),
+                        child: Icon(isDriverPost ? Icons.local_shipping : Icons.inventory_2, color: Colors.white, size: isSelected ? 30 : 20),
                       ),
                     ],
                   ),
